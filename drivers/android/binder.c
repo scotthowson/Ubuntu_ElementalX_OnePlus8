@@ -164,6 +164,9 @@ static int binder_set_stop_on_user_error(const char *val,
 module_param_call(stop_on_user_error, binder_set_stop_on_user_error,
 	param_get_int, &binder_stop_on_user_error, 0644);
 
+static bool binder_global_pid_lookups = true;
+module_param_named(global_pid_lookups, binder_global_pid_lookups, bool, S_IRUGO);
+
 #define binder_debug(mask, x...) \
 	do { \
 		if (binder_debug_mask & mask) \
@@ -2917,7 +2920,10 @@ static bool binder_proc_transaction(struct binder_transaction *t,
 	if (oneway) {
 		BUG_ON(thread);
 		if (node->has_async_transaction) {
-			pending_async = true;
+			// Halium: possible libgbinder bug workaround
+			/*pending_async = true;*/
+			pr_info("%d has pending async transaction, but still adding a new transaction to todo list (gbinder bug workaround)\n",
+					proc->pid);
 		} else {
 			node->has_async_transaction = true;
 		}
@@ -3256,15 +3262,7 @@ static void binder_transaction(struct binder_proc *proc,
 			return_error_line = __LINE__;
 			goto err_get_secctx_failed;
 		}
-		added_size = ALIGN(secctx_sz, sizeof(u64));
-		extra_buffers_size += added_size;
-		if (extra_buffers_size < added_size) {
-			/* integer overflow of extra_buffers_size */
-			return_error = BR_FAILED_REPLY;
-			return_error_param = EINVAL;
-			return_error_line = __LINE__;
-			goto err_bad_extra_size;
-		}
+		extra_buffers_size += ALIGN(secctx_sz, sizeof(u64));
 	}
 
 	trace_binder_transaction(reply, t, target_node);
@@ -3619,7 +3617,6 @@ err_copy_data_failed:
 	t->buffer->transaction = NULL;
 	binder_alloc_free_buf(&target_proc->alloc, t->buffer);
 err_binder_alloc_buf_failed:
-err_bad_extra_size:
 	if (secctx)
 		security_release_secctx(secctx, secctx_sz);
 err_get_secctx_failed:
@@ -3880,7 +3877,8 @@ static int binder_thread_write(struct binder_proc *proc,
 
 				buf_node = buffer->target_node;
 				binder_node_inner_lock(buf_node);
-				BUG_ON(!buf_node->has_async_transaction);
+				// Halium: possible libgbinder bug workaround
+				/*BUG_ON(!buf_node->has_async_transaction);*/
 				BUG_ON(buf_node->proc != proc);
 				w = binder_dequeue_work_head_ilocked(
 						&buf_node->async_todo);
@@ -4496,6 +4494,8 @@ retry:
 			trd->sender_pid =
 				task_tgid_nr_ns(sender,
 						task_active_pid_ns(current));
+				if (binder_global_pid_lookups && trd->sender_pid == 0)
+					trd->sender_pid = task_tgid_nr(sender);
 		} else {
 			trd->sender_pid = 0;
 		}
