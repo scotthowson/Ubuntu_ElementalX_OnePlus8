@@ -224,13 +224,26 @@ static inline unsigned int PROFILE_MEDIATES(struct aa_profile *profile,
 					profile->policy.start[0], &class, 1);
 }
 
+/* safe version of POLICY_MEDIATES for full range input */
+static inline unsigned int PROFILE_MEDIATES_SAFE(struct aa_profile *profile,
+						 unsigned char class)
+{
+	if (profile->policy.dfa)
+		return aa_dfa_match_len(profile->policy.dfa,
+					profile->policy.start[0], &class, 1);
+	return 0;
+}
+
 static inline unsigned int PROFILE_MEDIATES_AF(struct aa_profile *profile,
 					       u16 AF) {
 	unsigned int state = PROFILE_MEDIATES(profile, AA_CLASS_NET);
 	__be16 be_af = cpu_to_be16(AF);
 
-	if (!state)
-		return 0;
+	if (!state) {
+		state = PROFILE_MEDIATES(profile, AA_CLASS_NET);
+		if (!state)
+			return 0;
+	}
 	return aa_dfa_match_len(profile->policy.dfa, state, (char *) &be_af, 2);
 }
 
