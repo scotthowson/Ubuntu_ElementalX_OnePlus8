@@ -90,7 +90,7 @@ static const char * const power_supply_scope_text[] = {
 };
 
 static const char * const power_supply_usbc_text[] = {
-	"Nothing attached", "Sink attached", "Powered cable w/ sink",
+	"Mains", "Sink attached", "Powered cable w/ sink",
 	"Debug Accessory", "Audio Adapter", "Powered cable w/o sink",
 	"Source attached (default current)",
 	"Source attached (medium current)",
