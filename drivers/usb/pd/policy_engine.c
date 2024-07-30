@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (c) 2016-2019, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2016-2020, The Linux Foundation. All rights reserved.
  */
 
 #include <linux/completion.h>
@@ -25,6 +25,10 @@
 /* @bsp, 2019/08/30 Wireless Charging porting */
 #include <linux/oem/power/op_wlc_helper.h>
 #include "usbpd.h"
+
+#ifdef CONFIG_UCI_NOTIFICATIONS
+#include <linux/notification/notification.h>
+#endif
 
 /* @bsp, 2019/09/18 usb & PD porting */
 /* To start USB stack for USB3.1 compliance testing */
@@ -565,6 +569,7 @@ static inline void start_usb_host(struct usbpd *pd, bool ss)
 {
 	enum plug_orientation cc = usbpd_get_plug_orientation(pd);
 	union extcon_property_value val;
+	int ret = 0;
 
 	val.intval = (cc == ORIENTATION_CC2);
 	extcon_set_property(pd->extcon, EXTCON_USB_HOST,
@@ -575,6 +580,13 @@ static inline void start_usb_host(struct usbpd *pd, bool ss)
 			EXTCON_PROP_USB_SS, val);
 
 	extcon_set_state_sync(pd->extcon, EXTCON_USB_HOST, 1);
+
+	/* blocks until USB host is completely started */
+	ret = extcon_blocking_sync(pd->extcon, EXTCON_USB_HOST, 1);
+	if (ret) {
+		usbpd_err(&pd->dev, "err(%d) starting host", ret);
+		return;
+	}
 }
 
 static inline void stop_usb_peripheral(struct usbpd *pd)
@@ -3803,6 +3815,23 @@ static int psy_changed(struct notifier_block *nb, unsigned long evt, void *ptr)
 
 	typec_mode = val.intval;
 
+#ifdef CONFIG_UCI_NOTIFICATIONS
+	switch (typec_mode) {
+		case POWER_SUPPLY_TYPEC_NONE:
+			if (!pd->in_pr_swap) {
+				ntf_set_charge_state(false);
+			}
+		break;
+		/* Sink states */
+		case POWER_SUPPLY_TYPEC_SOURCE_DEFAULT:
+		case POWER_SUPPLY_TYPEC_SOURCE_MEDIUM:
+		case POWER_SUPPLY_TYPEC_SOURCE_HIGH:
+			ntf_set_charge_state(true);
+		break;
+		default:
+		break;
+	}
+#endif
 	ret = power_supply_get_property(pd->usb_psy,
 			POWER_SUPPLY_PROP_PE_START, &val);
 	if (ret) {

@@ -167,8 +167,7 @@ static void _ab_buslevel_update(struct kgsl_pwrctrl *pwr,
  * constraint if one exists.
  */
 static unsigned int _adjust_pwrlevel(struct kgsl_pwrctrl *pwr, int level,
-					struct kgsl_pwr_constraint *pwrc,
-					int popp)
+					struct kgsl_pwr_constraint *pwrc)
 {
 	unsigned int max_pwrlevel = max_t(unsigned int, pwr->thermal_pwrlevel,
 					pwr->max_pwrlevel);
@@ -195,9 +194,6 @@ static unsigned int _adjust_pwrlevel(struct kgsl_pwrctrl *pwr, int level,
 	}
 	break;
 	}
-
-	if (popp && (max_pwrlevel < pwr->active_pwrlevel))
-		max_pwrlevel = pwr->active_pwrlevel;
 
 	if (level < max_pwrlevel)
 		return max_pwrlevel;
@@ -522,7 +518,7 @@ unsigned int kgsl_pwrctrl_adjust_pwrlevel(struct kgsl_device *device,
 				unsigned int new_level)
 {
 	struct kgsl_pwrctrl *pwr = &device->pwrctrl;
-	unsigned int old_level = pwr->active_pwrlevel;
+	unsigned int __maybe_unused old_level = pwr->active_pwrlevel;
 
 	/* If a pwr constraint is expired, remove it */
 	if ((pwr->constraint.type != KGSL_CONSTRAINT_NONE) &&
@@ -539,8 +535,7 @@ unsigned int kgsl_pwrctrl_adjust_pwrlevel(struct kgsl_device *device,
 	 * Adjust the power level if required by thermal, max/min,
 	 * constraints, etc
 	 */
-	return _adjust_pwrlevel(pwr, new_level, &pwr->constraint,
-					device->pwrscale.popp_level);
+	return _adjust_pwrlevel(pwr, new_level, &pwr->constraint);
 }
 
 /**
@@ -681,7 +676,7 @@ void kgsl_pwrctrl_set_constraint(struct kgsl_device *device,
 	if (device == NULL || pwrc == NULL)
 		return;
 	constraint = _adjust_pwrlevel(&device->pwrctrl,
-				device->pwrctrl.active_pwrlevel, pwrc, 0);
+				device->pwrctrl.active_pwrlevel, pwrc);
 	pwrc_old = &device->pwrctrl.constraint;
 
 	/*
@@ -1285,75 +1280,6 @@ static ssize_t bus_split_store(struct device *dev,
 	return count;
 }
 
-static ssize_t default_pwrlevel_show(struct device *dev,
-				struct device_attribute *attr, char *buf)
-{
-	struct kgsl_device *device = dev_get_drvdata(dev);
-
-	return scnprintf(buf, PAGE_SIZE, "%d\n",
-		device->pwrctrl.default_pwrlevel);
-}
-
-static ssize_t default_pwrlevel_store(struct device *dev,
-				struct device_attribute *attr,
-				const char *buf, size_t count)
-{
-	struct kgsl_device *device = dev_get_drvdata(dev);
-	struct kgsl_pwrctrl *pwr = &device->pwrctrl;
-	struct kgsl_pwrscale *pwrscale = &device->pwrscale;
-	int ret;
-	unsigned int level = 0;
-
-	ret = kgsl_sysfs_store(buf, &level);
-	if (ret)
-		return ret;
-
-	if (level > pwr->num_pwrlevels - 2)
-		goto done;
-
-	mutex_lock(&device->mutex);
-	pwr->default_pwrlevel = level;
-	pwrscale->gpu_profile.profile.initial_freq
-			= pwr->pwrlevels[level].gpu_freq;
-
-	mutex_unlock(&device->mutex);
-done:
-	return count;
-}
-
-
-static ssize_t popp_store(struct device *dev,
-					struct device_attribute *attr,
-					const char *buf, size_t count)
-{
-	unsigned int val = 0;
-	struct kgsl_device *device = dev_get_drvdata(dev);
-	int ret;
-
-	ret = kgsl_sysfs_store(buf, &val);
-	if (ret)
-		return ret;
-
-	mutex_lock(&device->mutex);
-	if (val)
-		set_bit(POPP_ON, &device->pwrscale.popp_state);
-	else
-		clear_bit(POPP_ON, &device->pwrscale.popp_state);
-	mutex_unlock(&device->mutex);
-
-	return count;
-}
-
-static ssize_t popp_show(struct device *dev,
-					   struct device_attribute *attr,
-					   char *buf)
-{
-	struct kgsl_device *device = dev_get_drvdata(dev);
-
-	return scnprintf(buf, PAGE_SIZE, "%d\n",
-		test_bit(POPP_ON, &device->pwrscale.popp_state));
-}
-
 static ssize_t gpu_model_show(struct device *dev,
 			struct device_attribute *attr, char *buf)
 {
@@ -1552,8 +1478,6 @@ static DEVICE_ATTR_RW(force_clk_on);
 static DEVICE_ATTR_RW(force_bus_on);
 static DEVICE_ATTR_RW(force_rail_on);
 static DEVICE_ATTR_RW(bus_split);
-static DEVICE_ATTR_RW(default_pwrlevel);
-static DEVICE_ATTR_RW(popp);
 static DEVICE_ATTR_RW(force_no_nap);
 static DEVICE_ATTR_RO(gpu_model);
 static DEVICE_ATTR_RO(gpu_busy_percentage);
@@ -1581,8 +1505,6 @@ static const struct attribute *pwrctrl_attr_list[] = {
 	&dev_attr_force_rail_on.attr,
 	&dev_attr_force_no_nap.attr,
 	&dev_attr_bus_split.attr,
-	&dev_attr_default_pwrlevel.attr,
-	&dev_attr_popp.attr,
 	&dev_attr_gpu_model.attr,
 	&dev_attr_gpu_busy_percentage.attr,
 	&dev_attr_min_clock_mhz.attr,
@@ -2565,10 +2487,8 @@ static int kgsl_pwrctrl_enable(struct kgsl_device *device)
 	if (pwr->wakeup_maxpwrlevel) {
 		level = pwr->max_pwrlevel;
 		pwr->wakeup_maxpwrlevel = 0;
-	} else if (kgsl_popp_check(device)) {
-		level = pwr->active_pwrlevel;
 	} else {
-		level = pwr->default_pwrlevel;
+		level = pwr->num_pwrlevels - 1;
 	}
 
 	kgsl_pwrctrl_pwrlevel_change(device, level);
@@ -2638,12 +2558,22 @@ static int _init(struct kgsl_device *device)
 	int status = 0;
 
 	switch (device->state) {
+	case KGSL_STATE_RESET:
+		if (gmu_core_isenabled(device)) {
+			/*
+			 * If we fail a INIT -> AWARE transition, we will
+			 * transition back to INIT. However, we must hard reset
+			 * the GMU as we go back to INIT. This is done by
+			 * forcing a RESET -> INIT transition.
+			 */
+			gmu_core_suspend(device);
+			kgsl_pwrctrl_set_state(device, KGSL_STATE_INIT);
+		}
+		break;
 	case KGSL_STATE_NAP:
 		/* Force power on to do the stop */
 		status = kgsl_pwrctrl_enable(device);
 	case KGSL_STATE_ACTIVE:
-		/* fall through */
-	case KGSL_STATE_RESET:
 		kgsl_pwrctrl_irq(device, KGSL_PWRFLAGS_OFF);
 		del_timer_sync(&device->idle_timer);
 		kgsl_pwrscale_midframe_timer_cancel(device);
@@ -2746,7 +2676,6 @@ static int
 _aware(struct kgsl_device *device)
 {
 	int status = 0;
-	unsigned int state = device->state;
 
 	switch (device->state) {
 	case KGSL_STATE_RESET:
@@ -2756,12 +2685,6 @@ _aware(struct kgsl_device *device)
 		status = gmu_core_start(device);
 		break;
 	case KGSL_STATE_INIT:
-		/* if GMU already in FAULT */
-		if (gmu_core_isenabled(device) &&
-			test_bit(GMU_FAULT, &device->gmu_core.flags)) {
-			status = -EINVAL;
-			break;
-		}
 		status = kgsl_pwrctrl_enable(device);
 		break;
 	/* The following 3 cases shouldn't occur, but don't panic. */
@@ -2773,65 +2696,26 @@ _aware(struct kgsl_device *device)
 		kgsl_pwrscale_midframe_timer_cancel(device);
 		break;
 	case KGSL_STATE_SLUMBER:
-		/* if GMU already in FAULT */
-		if (gmu_core_isenabled(device) &&
-			test_bit(GMU_FAULT, &device->gmu_core.flags)) {
-			status = -EINVAL;
-			break;
-		}
-
 		status = kgsl_pwrctrl_enable(device);
 		break;
 	default:
 		status = -EINVAL;
 	}
 
-	if (status) {
-		if (gmu_core_isenabled(device)) {
-			/* GMU hang recovery */
-			kgsl_pwrctrl_set_state(device, KGSL_STATE_RESET);
-			set_bit(GMU_FAULT, &device->gmu_core.flags);
-			status = kgsl_pwrctrl_enable(device);
-			/* Cannot recover GMU failure GPU will not power on */
-
-			if (WARN_ONCE(status, "Failed to recover GMU\n")) {
-				if (device->snapshot)
-					device->snapshot->recovered = false;
-				/*
-				 * On recovery failure, we are clearing
-				 * GMU_FAULT bit and also not keeping
-				 * the state as RESET to make sure any
-				 * attempt to wake GMU/GPU after this
-				 * is treated as a fresh start. But on
-				 * recovery failure, GMU HS, clocks and
-				 * IRQs are still ON/enabled because of
-				 * which next GMU/GPU wakeup results in
-				 * multiple warnings from GMU start as HS,
-				 * clocks and IRQ were ON while doing a
-				 * fresh start i.e. wake from SLUMBER.
-				 *
-				 * Suspend the GMU on recovery failure
-				 * to make sure next attempt to wake up
-				 * GMU/GPU is indeed a fresh start.
-				 */
-				kgsl_pwrctrl_irq(device, KGSL_PWRFLAGS_OFF);
-				gmu_core_suspend(device);
-				kgsl_pwrctrl_set_state(device, state);
-			} else {
-				if (device->snapshot)
-					device->snapshot->recovered = true;
-				kgsl_pwrctrl_set_state(device,
-					KGSL_STATE_AWARE);
-			}
-
-			clear_bit(GMU_FAULT, &device->gmu_core.flags);
-			return status;
-		}
-
-		kgsl_pwrctrl_request_state(device, KGSL_STATE_NONE);
-	} else {
+	if (status && gmu_core_isenabled(device))
+	/*
+	 * If a SLUMBER/INIT -> AWARE fails, we transition back to
+	 * SLUMBER/INIT state. We must hard reset the GMU while
+	 * transitioning back to SLUMBER/INIT. A RESET -> AWARE
+	 * transition is different. It happens when dispatcher is
+	 * attempting reset/recovery as part of fault handling. If it
+	 * fails, we should still transition back to RESET in case
+	 * we want to attempt another reset/recovery.
+	 */
+		kgsl_pwrctrl_set_state(device, KGSL_STATE_RESET);
+	else
 		kgsl_pwrctrl_set_state(device, KGSL_STATE_AWARE);
-	}
+
 	return status;
 }
 
@@ -2917,6 +2801,13 @@ _slumber(struct kgsl_device *device)
 	case KGSL_STATE_AWARE:
 		kgsl_pwrctrl_disable(device);
 		kgsl_pwrctrl_set_state(device, KGSL_STATE_SLUMBER);
+		break;
+	case KGSL_STATE_RESET:
+		if (gmu_core_isenabled(device)) {
+			 /* Reset the GMU if we failed to boot the GMU */
+			gmu_core_suspend(device);
+			kgsl_pwrctrl_set_state(device, KGSL_STATE_SLUMBER);
+		}
 		break;
 	default:
 		kgsl_pwrctrl_request_state(device, KGSL_STATE_NONE);
@@ -3356,7 +3247,7 @@ EXPORT_SYMBOL(kgsl_pwr_limits_get_freq);
 int kgsl_pwrctrl_set_default_gpu_pwrlevel(struct kgsl_device *device)
 {
 	struct kgsl_pwrctrl *pwr = &device->pwrctrl;
-	unsigned int new_level = pwr->default_pwrlevel;
+	unsigned int new_level = pwr->num_pwrlevels - 1;
 	unsigned int old_level = pwr->active_pwrlevel;
 
 	/*

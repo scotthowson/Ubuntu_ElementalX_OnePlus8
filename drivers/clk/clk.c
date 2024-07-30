@@ -1,7 +1,7 @@
 /*
  * Copyright (C) 2010-2011 Canonical Ltd <jeremy.kerr@canonical.com>
  * Copyright (C) 2011-2012 Linaro Ltd <mturquette@linaro.org>
- * Copyright (c) 2017-2019, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2017-2020, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -43,6 +43,17 @@ static int enable_refcnt;
 static HLIST_HEAD(clk_root_list);
 static HLIST_HEAD(clk_orphan_list);
 static LIST_HEAD(clk_notifier_list);
+
+static struct hlist_head *all_lists[] = {
+	&clk_root_list,
+	&clk_orphan_list,
+	NULL,
+};
+
+static struct hlist_head *orphan_list[] = {
+	&clk_orphan_list,
+	NULL,
+};
 
 struct clk_handoff_vdd {
 	struct list_head list;
@@ -131,7 +142,11 @@ static int clk_pm_runtime_get(struct clk_core *core)
 		return 0;
 
 	ret = pm_runtime_get_sync(core->dev);
-	return ret < 0 ? ret : 0;
+	if (ret < 0) {
+		pm_runtime_put_noidle(core->dev);
+		return ret;
+	}
+	return 0;
 }
 
 static void clk_pm_runtime_put(struct clk_core *core)
@@ -3152,17 +3167,6 @@ static u32 debug_suspend;
 static DEFINE_MUTEX(clk_debug_lock);
 static HLIST_HEAD(clk_debug_list);
 
-static struct hlist_head *all_lists[] = {
-	&clk_root_list,
-	&clk_orphan_list,
-	NULL,
-};
-
-static struct hlist_head *orphan_list[] = {
-	&clk_orphan_list,
-	NULL,
-};
-
 static void clk_state_subtree(struct clk_core *c)
 {
 	int vdd_level = 0;
@@ -3503,45 +3507,6 @@ do {							\
 		pr_info(fmt, ##__VA_ARGS__);		\
 } while (0)
 
-/*
- * clock_debug_print_enabled_debug_suspend() - Print names of enabled clocks
- * during suspend.
- */
-static void clock_debug_print_enabled_debug_suspend(struct seq_file *s)
-{
-	struct clk_core *core;
-	int cnt = 0;
-
-	if (!mutex_trylock(&clk_debug_lock))
-		return;
-
-	clock_debug_output(s, 0, "Enabled clocks:\n");
-
-	hlist_for_each_entry(core, &clk_debug_list, debug_node) {
-		if (!core->prepare_count)
-			continue;
-
-		if (core->vdd_class)
-			clock_debug_output(s, 0, " %s:%u:%u [%ld, %d]",
-					core->name, core->prepare_count,
-					core->enable_count, core->rate,
-					clk_find_vdd_level(core, core->rate));
-
-		else
-			clock_debug_output(s, 0, " %s:%u:%u [%ld]",
-					core->name, core->prepare_count,
-					core->enable_count, core->rate);
-		cnt++;
-	}
-
-	mutex_unlock(&clk_debug_lock);
-
-	if (cnt)
-		clock_debug_output(s, 0, "Enabled clock count: %d\n", cnt);
-	else
-		clock_debug_output(s, 0, "No clocks enabled.\n");
-}
-
 static int clock_debug_print_clock(struct clk_core *c, struct seq_file *s)
 {
 	char *start = "";
@@ -3552,7 +3517,7 @@ static int clock_debug_print_clock(struct clk_core *c, struct seq_file *s)
 
 	clk = c->hw->clk;
 
-	clock_debug_output(s, 0, "\t");
+	clock_debug_output(s, 0, "    ");
 
 	do {
 		if (clk->core->vdd_class)
@@ -3584,9 +3549,10 @@ static void clock_debug_print_enabled_clocks(struct seq_file *s)
 	struct clk_core *core;
 	int cnt = 0;
 
-	clock_debug_output(s, 0, "Enabled clocks:\n");
+	if (!mutex_trylock(&clk_debug_lock))
+		return;
 
-	mutex_lock(&clk_debug_lock);
+	clock_debug_output(s, 0, "Enabled clocks:\n");
 
 	hlist_for_each_entry(core, &clk_debug_list, debug_node)
 		cnt += clock_debug_print_clock(core, s);
@@ -3911,7 +3877,7 @@ void clock_debug_print_enabled(void)
 	if (likely(!debug_suspend))
 		return;
 
-	clock_debug_print_enabled_debug_suspend(NULL);
+	clock_debug_print_enabled_clocks(NULL);
 }
 EXPORT_SYMBOL_GPL(clock_debug_print_enabled);
 
@@ -4146,11 +4112,17 @@ static int __clk_core_init(struct clk_core *core)
 	if (core->flags & CLK_IS_CRITICAL) {
 		unsigned long flags;
 
-		clk_core_prepare(core);
+		ret = clk_core_prepare(core);
+		if (ret)
+			goto out;
 
 		flags = clk_enable_lock();
-		clk_core_enable(core);
+		ret = clk_core_enable(core);
 		clk_enable_unlock(flags);
+		if (ret) {
+			clk_core_unprepare(core);
+			goto out;
+		}
 	}
 
 	/*
@@ -4231,6 +4203,9 @@ static int __clk_core_init(struct clk_core *core)
 out:
 	clk_pm_runtime_put(core);
 unlock:
+	if (ret)
+		hlist_del_init(&core->child_node);
+
 	clk_prepare_unlock();
 
 	if (!ret)
@@ -4459,6 +4434,34 @@ static const struct clk_ops clk_nodrv_ops = {
 	.set_parent	= clk_nodrv_set_parent,
 };
 
+static void clk_core_evict_parent_cache_subtree(struct clk_core *root,
+						struct clk_core *target)
+{
+	int i;
+	struct clk_core *child;
+
+	for (i = 0; i < root->num_parents; i++)
+		if (root->parents[i] == target)
+			root->parents[i] = NULL;
+
+	hlist_for_each_entry(child, &root->children, child_node)
+		clk_core_evict_parent_cache_subtree(child, target);
+}
+
+/* Remove this clk from all parent caches */
+static void clk_core_evict_parent_cache(struct clk_core *core)
+{
+	struct hlist_head **lists;
+	struct clk_core *root;
+
+	lockdep_assert_held(&prepare_lock);
+
+	for (lists = all_lists; *lists; lists++)
+		hlist_for_each_entry(root, *lists, child_node)
+			clk_core_evict_parent_cache_subtree(root, core);
+
+}
+
 /**
  * clk_unregister - unregister a currently registered clock
  * @clk: clock to unregister
@@ -4496,6 +4499,8 @@ void clk_unregister(struct clk *clk)
 					  child_node)
 			clk_core_set_parent_nolock(child, NULL);
 	}
+
+	clk_core_evict_parent_cache(clk->core);
 
 	hlist_del_init(&clk->core->child_node);
 

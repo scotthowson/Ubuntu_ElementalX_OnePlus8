@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (c) 2013, 2018-2019, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2013, 2018-2020, The Linux Foundation. All rights reserved.
  */
 
 #include <linux/kernel.h>
@@ -342,9 +342,12 @@ static int _freq_tbl_determine_rate(struct clk_hw *hw, const struct freq_tbl *f,
 	p = clk_hw_get_parent_by_index(hw, index);
 	if (!p)
 		return -EINVAL;
+
 	if (clk_flags & CLK_SET_RATE_PARENT) {
 		rate = f->freq;
 		if (f->pre_div) {
+			if (!rate)
+				rate = req->rate;
 			rate /= 2;
 			rate *= f->pre_div + 1;
 		}
@@ -1467,7 +1470,7 @@ static int clk_rcg2_dfs_populate_freq_table(struct clk_rcg2 *rcg)
 	struct freq_tbl *freq_tbl;
 	int i, ret;
 
-	freq_tbl = kcalloc(MAX_PERF_LEVEL, sizeof(*freq_tbl), GFP_KERNEL);
+	freq_tbl = kcalloc(MAX_PERF_LEVEL + 1, sizeof(*freq_tbl), GFP_KERNEL);
 	if (!freq_tbl)
 		return -ENOMEM;
 	rcg->freq_tbl = freq_tbl;
@@ -1551,6 +1554,7 @@ static const struct clk_ops clk_rcg2_dfs_ops = {
 	.get_parent = clk_rcg2_get_parent,
 	.determine_rate = clk_rcg2_dfs_determine_rate,
 	.recalc_rate = clk_rcg2_dfs_recalc_rate,
+	.list_rate = clk_rcg2_list_rate,
 };
 
 static int clk_rcg2_enable_dfs(const struct clk_rcg_dfs_data *data,

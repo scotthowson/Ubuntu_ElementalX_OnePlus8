@@ -36,6 +36,11 @@
 #include <linux/fb.h>
 #include <linux/vmalloc.h>
 
+#ifdef CONFIG_UCI_NOTIFICATIONS
+#include <linux/notification/notification.h>
+#include <linux/uci/uci.h>
+#endif
+
 
 /******************************************************
  *
@@ -79,15 +84,6 @@ struct pm_qos_request pm_qos_req_vb;
 /* add haptic audio tp mask */
 extern struct shake_point record_point[10];
 /* add haptic audio tp mask end */
-
-#ifdef CONFIG_HAPTIC_FEEDBACK_DISABLE
-int ignore_next_request = 0;
-void hap_ignore_next_request(void)
-{
-    ignore_next_request = 1;
-}
-#endif
-
 /******************************************************
  *
  * variable
@@ -238,6 +234,63 @@ struct aw8697 *g_aw8697;
 static int aw8697_haptic_get_f0(struct aw8697 *aw8697);
 static bool check_factory_mode(void);
 extern void msm_cpuidle_set_sleep_disable(bool disable);
+
+#ifdef CONFIG_UCI_NOTIFICATIONS
+static bool face_down_hr = false;
+static bool proximity = false;
+static bool in_pocket = false;
+static int notf_booster_perc = 95;
+static int vib_booster_perc = 70;
+
+int uci_get_notification_booster_overdrive_perc(void) {
+    return notf_booster_perc;
+}
+int uci_get_vib_booster_overdrive_perc(void) {
+    return vib_booster_perc;
+}
+
+// register sys uci listener
+static void uci_sys_listener(void) {
+    // TODO use ntf listener instead
+
+    pr_info("%s [VIB] uci sys parse happened...\n",__func__);
+    proximity = !!uci_get_sys_property_int_mm("proximity", 1,0,1);
+    face_down_hr = !!uci_get_sys_property_int_mm("face_down_hr", 0,0,1);
+    // check if perfectly horizontal facedown is not true, and in proximity.
+    // ...(so it's supposedly not on table, but in pocket) then in_pocket = true
+    in_pocket = !face_down_hr && proximity;
+}
+
+static int boost_only_in_pocket = false;
+static int vib_override = false;
+
+static void uci_user_listener(void) {
+    //pr_info("%s [VIB] uci user parse happened...\n",__func__);
+    boost_only_in_pocket = !!uci_get_user_property_int_mm("boost_only_in_pocket", 0, 0, 1);
+    notf_booster_perc = uci_get_user_property_int_mm("notification_booster_overdrive_perc", 95, 50, 100);
+    vib_override = !!uci_get_user_property_int_mm("vibration_power_set", 0, 0, 1);
+    vib_booster_perc = uci_get_user_property_int_mm("vibration_power_percentage", 70, 0, 100);
+}
+
+#if 0
+static int smart_get_boost_on(void) {
+    int level = smart_get_notification_level(NOTIF_VIB_BOOSTER);
+    int ret = 1;
+    if (level != NOTIF_DEFAULT) {
+        ret = 0; // should suspend boosting if not DEFAULT level
+    }
+    pr_info("%s smart_notif =========== level: %d  notif vib should boost %d \n",__func__, level, ret);
+    return ret;
+}
+#endif
+
+
+static int should_boost(void) {
+    if (boost_only_in_pocket && in_pocket) return !ntf_is_screen_on();
+    return 0;
+}
+
+#endif
 
 /******************************************************
  *
@@ -854,27 +907,37 @@ static int aw8697_haptic_set_bst_peak_cur(struct aw8697 *aw8697, unsigned char p
     return 0;
 }
 
-static unsigned char aw8697_haptic_set_level(struct aw8697 *aw8697, int gain)
-{
-    int val = 80;
-
-#ifdef CONFIG_HAPTIC_FEEDBACK_DISABLE
-    if ((ignore_next_request) && (gain != 0)) {
-       ignore_next_request = 0;
-       return 0;
-    }
+#ifdef CONFIG_UCI_NOTIFICATIONS
+static bool override_gain_for_notif = false;
 #endif
-
-    val = aw8697->level * gain / 3;
-    if (val > 255)
-        val = 255;
-
-    return val;
-}
 
 static int aw8697_haptic_set_gain(struct aw8697 *aw8697, unsigned char gain)
 {
-    aw8697_i2c_write(aw8697, AW8697_REG_DATDBG, aw8697_haptic_set_level(aw8697, gain));
+#ifdef CONFIG_UCI_NOTIFICATIONS
+	static int val_pre = 0;
+	int val = gain;
+	if (vib_override) {
+		// rattling starts above the max range's 40%, calc to max and cut back to 40%
+		val =  ((uci_get_vib_booster_overdrive_perc() * gain / 30) * 40)/100;
+		if (val > 255)
+			val = 255;
+		if (val<1) val = 1;
+	}
+	if (should_boost() && override_gain_for_notif) {
+		// rattling starts above the max range's 40%, calc to max and cut back to 40%
+		val =  ((uci_get_notification_booster_overdrive_perc() * gain / 30) * 40)/100;
+		if (val > 255)
+			val = 255;
+		if (val<1) val = 1;
+	}
+	if (val_pre != val) {
+		pr_info("%s setting gain value to: %d from %d\n",__func__,val,gain);
+	}
+	val_pre = val;
+	gain = (unsigned char)val;
+#endif
+    aw8697_i2c_write(aw8697, AW8697_REG_DATDBG, gain);
+
     return 0;
 }
 
@@ -3041,7 +3104,6 @@ static int aw8697_haptic_init(struct aw8697 *aw8697)
     /*For haptic test 90mA in AT begin*/
     aw8697->activate_mode = AW8697_HAPTIC_ACTIVATE_RAM_MODE;
     aw8697_haptic_set_wav_loop(aw8697, aw8697->loop[0x00], 0xff);
-    aw8697->level = 3;
     if (check_factory_mode()) {
        aw8697_haptic_set_bst_vol(aw8697, 0x09);
        aw8697_haptic_set_gain(aw8697, 0x80);
@@ -3285,6 +3347,90 @@ static ssize_t aw8697_activate_show(struct device *dev,
     return snprintf(buf, PAGE_SIZE, "%d\n", aw8697->state);
 }
 
+#ifdef CONFIG_UCI
+static struct aw8697 *__aw8697;
+static int __activate(unsigned int val, int duration, int strength) {
+    struct aw8697 *aw8697 = __aw8697;
+    int count = 0;
+    int rtp_is_going_on = 0;
+    static unsigned int  val_pre;
+
+    if (aw8697 == NULL) return 1;
+    // internal boosting - shouldn't override gain for notif boosting, set it false
+    override_gain_for_notif = false;
+
+    // duration
+    if (duration > 0)
+        aw8697->duration = duration;
+
+    // strength
+    mutex_lock(&aw8697->lock);
+    aw8697->gain = strength;
+    aw8697_haptic_set_gain(aw8697, aw8697->gain);
+    mutex_unlock(&aw8697->lock);
+
+    // activate
+
+    /*OP add for juge rtp on begin*/
+    rtp_is_going_on = aw8697_haptic_juge_RTP_is_going_on(aw8697);
+    if (rtp_is_going_on && aw8697->rtp_is_playing)
+       return count;
+    if (!aw8697->ram_init)
+       return count;
+    /*OP add for juge rtp on end*/
+
+    if (val != 0 && val != 1)
+        return count;
+    if (val_pre != val)
+       pr_info("%s: value=%d\n", __FUNCTION__, val);
+    val_pre = val;
+    mutex_lock(&aw8697->lock);
+/*for type Android OS's vibrator 20181225 begin*/
+/*set mode as RAM*/
+	aw8697->activate_mode = AW8697_HAPTIC_ACTIVATE_RAM_MODE;
+/*set wave number,index*/
+    if (check_factory_mode() && aw8697->count_go)
+        aw8697->index = 19;/* index 19sine 170hz*/
+    else
+        aw8697->index = 10;/*sine 170hz*/
+    aw8697_haptic_set_repeat_wav_seq(aw8697, aw8697->index);
+/*for type Android OS's vibrator 20181225  end*/
+    if (val == 0)
+       mdelay(10);
+	aw8697->state = val;
+	if (val == 0) {
+		aw8697_haptic_stop(aw8697);
+		aw8697_haptic_set_rtp_aei(aw8697, false);
+		aw8697_interrupt_clear(aw8697);
+		aw8697->sin_add_flag = 0;
+		pr_info("%s: value=%d\n", __FUNCTION__, val);
+	} else {
+			if (check_factory_mode()) {
+				aw8697->rtp_file_num = 114;//Number for AT vibration
+				aw8697->sin_add_flag = 0;
+			} else {
+					if (aw8697->duration <= 500) {
+						aw8697->sin_add_flag = 0;
+						val = (aw8697->duration - 1)/20;
+						aw8697->rtp_file_num = val+AW8697_LONG_INDEX_HEAD;
+					} else {
+						aw8697->sin_add_flag = 1;
+						val = 25;//aw8697->duration/20 = 500/20
+						aw8697->rtp_file_num = 113;
+					}
+			}
+			pr_info("%s: aw8697->rtp_file_num=%d\n", __FUNCTION__, aw8697->rtp_file_num);
+			aw8697_haptic_stop(aw8697);
+			aw8697_haptic_set_rtp_aei(aw8697, false);
+			aw8697_interrupt_clear(aw8697);
+			queue_work(system_highpri_wq, &aw8697->rtp_work);
+	}
+	mutex_unlock(&aw8697->lock);
+	return 0;
+}
+
+#endif
+
 static ssize_t aw8697_activate_store(struct device *dev,
         struct device_attribute *attr, const char *buf, size_t count)
 {
@@ -3358,12 +3504,50 @@ static ssize_t aw8697_activate_store(struct device *dev,
 			aw8697_haptic_stop(aw8697);
 			aw8697_haptic_set_rtp_aei(aw8697, false);
 			aw8697_interrupt_clear(aw8697);
+#ifdef CONFIG_UCI_NOTIFICATIONS
+			if (aw8697->duration > 80) {
+				pr_info("%s: ntf_vibration calling on activate_store: duration = %d\n",__func__,aw8697->duration);
+				if (should_boost()) {
+					pr_info("%s: notif should boost!\n",__func__);
+					// this is a notf, set overrid_gain_for_notif flag accordingly
+					override_gain_for_notif = true;
+				} else {
+					pr_info("%s: notif shouldn't boost!\n",__func__);
+					// shoudln't boost, set it false...
+					override_gain_for_notif = false;
+				}
+				ntf_vibration(aw8697->duration);
+			} else {
+				// haptics - shouldn't override gain for notif boosting, set it false
+				override_gain_for_notif = false;
+			}
+#endif
 			queue_work(system_highpri_wq, &aw8697->rtp_work);
 	}
 	mutex_unlock(&aw8697->lock);
 
     return count;
 }
+
+#ifdef CONFIG_UCI
+void set_vibrate_2(int time_ms, int power) {
+	__activate(1,time_ms,power);
+}
+
+void set_vibrate(int time_ms)
+{
+	pr_info("%s aw8697 time_ms = %d\n",__func__,time_ms);
+	set_vibrate_2(time_ms, 50);
+}
+void set_vibrate_boosted(int time_ms)
+{
+	pr_info("%s aw8697 time_ms = %d\n",__func__,time_ms);
+	set_vibrate_2(time_ms, 128);
+}
+EXPORT_SYMBOL(set_vibrate_2);
+EXPORT_SYMBOL(set_vibrate);
+EXPORT_SYMBOL(set_vibrate_boosted);
+#endif
 
 static ssize_t aw8697_activate_mode_show(struct device *dev,
         struct device_attribute *attr, char *buf)
@@ -3530,48 +3714,6 @@ static ssize_t aw8697_gain_store(struct device *dev,
     val_pre = val;
     mutex_lock(&aw8697->lock);
     aw8697->gain = val;
-    aw8697_haptic_set_gain(aw8697, aw8697->gain);
-    mutex_unlock(&aw8697->lock);
-    return count;
-}
-
-static ssize_t aw8697_level_show(struct device *dev,
-        struct device_attribute *attr, char *buf)
-{
-#ifdef TIMED_OUTPUT
-    struct timed_output_dev *to_dev = dev_get_drvdata(dev);
-    struct aw8697 *aw8697 = container_of(to_dev, struct aw8697, to_dev);
-#else
-    struct led_classdev *cdev = dev_get_drvdata(dev);
-    struct aw8697 *aw8697 = container_of(cdev, struct aw8697, cdev);
-#endif
-
-    return snprintf(buf, PAGE_SIZE, "%d\n", aw8697->level);
-}
-
-static ssize_t aw8697_level_store(struct device *dev,
-        struct device_attribute *attr, const char *buf, size_t count)
-{
-#ifdef TIMED_OUTPUT
-    struct timed_output_dev *to_dev = dev_get_drvdata(dev);
-    struct aw8697 *aw8697 = container_of(to_dev, struct aw8697, to_dev);
-#else
-    struct led_classdev *cdev = dev_get_drvdata(dev);
-    struct aw8697 *aw8697 = container_of(cdev, struct aw8697, cdev);
-#endif
-    unsigned int val = 0;
-    int rc = 0;
-
-    rc = kstrtouint(buf, 0, &val);
-    if (rc < 0)
-        return rc;
-
-    if (val < 0 || val > 10)
-        val = 3;
-
-    pr_info("%s: value=%d\n", __FUNCTION__, val);
-    mutex_lock(&aw8697->lock);
-    aw8697->level = val;
     aw8697_haptic_set_gain(aw8697, aw8697->gain);
     mutex_unlock(&aw8697->lock);
     return count;
@@ -3848,6 +3990,9 @@ static ssize_t aw8697_rtp_store(struct device *dev, struct device_attribute *att
 
     return count;
 }
+
+
+
 
 static ssize_t aw8697_ram_update_show(struct device *dev, struct device_attribute *attr,
         char *buf)
@@ -5376,7 +5521,6 @@ static DEVICE_ATTR(activate_mode, S_IWUSR | S_IRUGO, aw8697_activate_mode_show, 
 static DEVICE_ATTR(index, S_IWUSR | S_IRUGO, aw8697_index_show, aw8697_index_store);
 static DEVICE_ATTR(vmax, S_IWUSR | S_IRUGO, aw8697_vmax_show, aw8697_vmax_store);
 static DEVICE_ATTR(gain, S_IWUSR | S_IRUGO, aw8697_gain_show, aw8697_gain_store);
-static DEVICE_ATTR(level, S_IWUSR | S_IRUGO, aw8697_level_show, aw8697_level_store);
 static DEVICE_ATTR(seq, S_IWUSR | S_IRUGO, aw8697_seq_show, aw8697_seq_store);
 static DEVICE_ATTR(loop, S_IWUSR | S_IRUGO, aw8697_loop_show, aw8697_loop_store);
 static DEVICE_ATTR(register, S_IWUSR | S_IRUGO, aw8697_reg_show, aw8697_reg_store);
@@ -5418,7 +5562,6 @@ static struct attribute *aw8697_vibrator_attributes[] = {
     &dev_attr_index.attr,
     &dev_attr_vmax.attr,
     &dev_attr_gain.attr,
-    &dev_attr_level.attr,
     &dev_attr_seq.attr,
     &dev_attr_loop.attr,
     &dev_attr_register.attr,
@@ -5508,30 +5651,6 @@ static void aw8697_vibrator_work_routine(struct work_struct *work)
                   HRTIMER_MODE_REL);
     }
     mutex_unlock(&aw8697->lock);
-}
-
-void set_vibrate(void)
-{
-    int rtp_is_going_on = 0;
-
-    rtp_is_going_on = aw8697_haptic_juge_RTP_is_going_on(g_aw8697);
-    if (rtp_is_going_on)
-       return;
-    if (!g_aw8697->ram_init)
-       return;
-
-    mutex_lock(&g_aw8697->lock);
-    g_aw8697->activate_mode = AW8697_HAPTIC_ACTIVATE_RAM_MODE;
-    g_aw8697->index = 10;/*sine 170hz*/
-    g_aw8697->duration = 30;
-    aw8697_haptic_set_repeat_wav_seq(g_aw8697, g_aw8697->index);
-
-    hrtimer_cancel(&g_aw8697->timer);
-
-    g_aw8697->state = 1;
-    mutex_unlock(&g_aw8697->lock);
-    schedule_work(&g_aw8697->vibrator_work);
-
 }
 
 static int aw8697_vibrator_init(struct aw8697 *aw8697)
@@ -6033,7 +6152,13 @@ static int aw8697_i2c_probe(struct i2c_client *i2c, const struct i2c_device_id *
        pr_info("Unable to register fb_notifier: %d\n", ret);
 /* add haptic audio tp mask end */
     pr_info("%s probe completed successfully!\n", __func__);
-
+#ifdef CONFIG_UCI
+    __aw8697 = aw8697;
+#endif
+#ifdef CONFIG_UCI_NOTIFICATIONS
+    uci_add_user_listener(uci_user_listener);
+    uci_add_sys_listener(uci_sys_listener);
+#endif
     return 0;
 
 err_sysfs:

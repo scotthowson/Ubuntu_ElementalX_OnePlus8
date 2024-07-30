@@ -12,6 +12,7 @@
 #include <linux/kcov.h>
 #include <linux/irq.h>
 #include <linux/delay.h>
+#include <linux/scs.h>
 
 #include <asm/switch_to.h>
 #include <asm/tlb.h>
@@ -2510,6 +2511,7 @@ int sched_fork(unsigned long clone_flags, struct task_struct *p)
 	 * Silence PROVE_RCU.
 	 */
 	raw_spin_lock_irqsave(&p->pi_lock, flags);
+	rseq_migrate(p);
 	/*
 	 * We're setting the CPU for the first time, we don't migrate,
 	 * so use __set_task_cpu().
@@ -2581,6 +2583,7 @@ void wake_up_new_task(struct task_struct *p)
 	 * as we're not fully set-up yet.
 	 */
 	p->recent_used_cpu = task_cpu(p);
+	rseq_migrate(p);
 	__set_task_cpu(p, select_task_rq(p, task_cpu(p), SD_BALANCE_FORK, 0, 1));
 #endif
 	rq = __task_rq_lock(p, &rf);
@@ -3405,54 +3408,16 @@ static inline void sched_tick_stop(int cpu) { }
 #if defined(CONFIG_PREEMPT) && (defined(CONFIG_DEBUG_PREEMPT) || \
 				defined(CONFIG_TRACE_PREEMPT_TOGGLE))
 /*
- * preemptoff stack tracing threshold in ns.
- * default: 1ms
- */
-unsigned int sysctl_preemptoff_tracing_threshold_ns = 1000000UL;
-
-struct preempt_store {
-	u64 ts;
-	unsigned long caddr[4];
-	bool irqs_disabled;
-};
-
-DEFINE_PER_CPU(struct preempt_store, the_ps);
-
-/*
- * This is only called from __schedule() upon context switch.
- *
- * schedule() calls __schedule() with preemption disabled.
- * if we had entered idle and exiting idle now, reset the preemption
- * tracking otherwise we may think preemption is disabled the whole time
- * when the non idle task re-enables the preemption in schedule().
- */
-static inline void preempt_latency_reset(void)
-{
-	if (is_idle_task(this_rq()->curr))
-		this_cpu_ptr(&the_ps)->ts = 0;
-}
-
-/*
  * If the value passed in is equal to the current preempt count
  * then we just disabled preemption. Start timing the latency.
  */
 static inline void preempt_latency_start(int val)
 {
-	int cpu = raw_smp_processor_id();
-	struct preempt_store *ps = &per_cpu(the_ps, cpu);
-
 	if (preempt_count() == val) {
 		unsigned long ip = get_lock_parent_ip();
 #ifdef CONFIG_DEBUG_PREEMPT
 		current->preempt_disable_ip = ip;
 #endif
-		ps->ts = sched_clock();
-		ps->caddr[0] = CALLER_ADDR0;
-		ps->caddr[1] = CALLER_ADDR1;
-		ps->caddr[2] = CALLER_ADDR2;
-		ps->caddr[3] = CALLER_ADDR3;
-		ps->irqs_disabled = irqs_disabled();
-
 		trace_preempt_off(CALLER_ADDR0, ip);
 	}
 }
@@ -3486,18 +3451,6 @@ NOKPROBE_SYMBOL(preempt_count_add);
 static inline void preempt_latency_stop(int val)
 {
 	if (preempt_count() == val) {
-		struct preempt_store *ps = &per_cpu(the_ps,
-				raw_smp_processor_id());
-		u64 delta = ps->ts ? (sched_clock() - ps->ts) : 0;
-
-		/*
-		 * Trace preempt disable stack if preemption
-		 * is disabled for more than the threshold.
-		 */
-		if (delta > sysctl_preemptoff_tracing_threshold_ns)
-			trace_sched_preempt_disable(delta, ps->irqs_disabled,
-						ps->caddr[0], ps->caddr[1],
-						ps->caddr[2], ps->caddr[3]);
 		trace_preempt_on(CALLER_ADDR0, get_lock_parent_ip());
 	}
 }
@@ -3527,7 +3480,6 @@ NOKPROBE_SYMBOL(preempt_count_sub);
 #else
 static inline void preempt_latency_start(int val) { }
 static inline void preempt_latency_stop(int val) { }
-static inline void preempt_latency_reset(void) { }
 #endif
 
 static inline unsigned long get_preempt_disable_ip(struct task_struct *p)
@@ -3751,7 +3703,6 @@ static void __sched notrace __schedule(bool preempt)
 		if (!prev->on_rq)
 			prev->last_sleep_ts = wallclock;
 
-		preempt_latency_reset();
 		update_task_ravg(prev, rq, PUT_PREV_TASK, wallclock, 0);
 		update_task_ravg(next, rq, PICK_NEXT_TASK, wallclock, 0);
 		rq->nr_switches++;
@@ -4130,7 +4081,8 @@ void rt_mutex_setprio(struct task_struct *p, struct task_struct *pi_task)
 	 */
 	if (dl_prio(prio)) {
 		if (!dl_prio(p->normal_prio) ||
-		    (pi_task && dl_entity_preempt(&pi_task->dl, &p->dl))) {
+		    (pi_task && dl_prio(pi_task->prio) &&
+		     dl_entity_preempt(&pi_task->dl, &p->dl))) {
 			p->dl.dl_boosted = 1;
 			queue_flag |= ENQUEUE_REPLENISH;
 		} else
@@ -5250,8 +5202,10 @@ unsigned int sched_lib_mask_force;
 bool is_sched_lib_based_app(pid_t pid)
 {
 	const char *name = NULL;
+	char *libname, *lib_list;
 	struct vm_area_struct *vma;
 	char path_buf[LIB_PATH_LENGTH];
+	char *tmp_lib_name;
 	bool found = false;
 	struct task_struct *p;
 	struct mm_struct *mm;
@@ -5259,11 +5213,16 @@ bool is_sched_lib_based_app(pid_t pid)
 	if (strnlen(sched_lib_name, LIB_PATH_LENGTH) == 0)
 		return false;
 
+	tmp_lib_name = kmalloc(LIB_PATH_LENGTH, GFP_KERNEL);
+	if (!tmp_lib_name)
+		return false;
+
 	rcu_read_lock();
 
 	p = find_process_by_pid(pid);
 	if (!p) {
 		rcu_read_unlock();
+		kfree(tmp_lib_name);
 		return false;
 	}
 
@@ -5283,10 +5242,15 @@ bool is_sched_lib_based_app(pid_t pid)
 			if (IS_ERR(name))
 				goto release_sem;
 
-			if (strnstr(name, sched_lib_name,
+			strlcpy(tmp_lib_name, sched_lib_name, LIB_PATH_LENGTH);
+			lib_list = tmp_lib_name;
+			while ((libname = strsep(&lib_list, ","))) {
+				libname = skip_spaces(libname);
+				if (strnstr(name, libname,
 					strnlen(name, LIB_PATH_LENGTH))) {
-				found = true;
-				break;
+					found = true;
+					goto release_sem;
+				}
 			}
 		}
 	}
@@ -5296,6 +5260,7 @@ release_sem:
 	mmput(mm);
 put_task_struct:
 	put_task_struct(p);
+	kfree(tmp_lib_name);
 	return found;
 }
 
@@ -5865,6 +5830,7 @@ void init_idle(struct task_struct *idle, int cpu)
 	idle->se.exec_start = sched_clock();
 	idle->flags |= PF_IDLE;
 
+	scs_task_reset(idle);
 	kasan_unpoison_task_stack(idle);
 
 #ifdef CONFIG_SMP
@@ -6014,13 +5980,14 @@ void idle_task_exit(void)
 	struct mm_struct *mm = current->active_mm;
 
 	BUG_ON(cpu_online(smp_processor_id()));
+	BUG_ON(current != this_rq()->idle);
 
 	if (mm != &init_mm) {
 		switch_mm(mm, &init_mm, current);
-		current->active_mm = &init_mm;
 		finish_arch_post_lock_switch();
 	}
-	mmdrop(mm);
+
+	/* finish_cpu(), as ran on the BP, will clean up the active_mm state */
 }
 
 /*

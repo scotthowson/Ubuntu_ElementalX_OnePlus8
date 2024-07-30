@@ -30,7 +30,6 @@ suspend_state_t pm_suspend_target_state;
 #define pm_suspend_target_state	(PM_SUSPEND_ON)
 #endif
 
-
 #ifdef CONFIG_BOEFFLA_WL_BLOCKER
 #include "boeffla_wl_blocker.h"
 
@@ -40,7 +39,6 @@ bool wl_blocker_debug = false;
 
 static void wakeup_source_deactivate(struct wakeup_source *ws);
 #endif
-
 
 /*
  * If set, the suspend/hibernate code will abort transitions to a sleep state
@@ -668,7 +666,6 @@ void __pm_stay_awake(struct wakeup_source *ws)
 }
 EXPORT_SYMBOL_GPL(__pm_stay_awake);
 
-
 /**
  * pm_stay_awake - Notify the PM core that a wakeup event is being processed.
  * @dev: Device the wakeup event is related to.
@@ -935,7 +932,7 @@ void pm_print_active_wakeup_sources(void)
 #ifdef CONFIG_BOEFFLA_WL_BLOCKER
 			if (!check_for_block(ws))	// AP: check if wakelock is on wakelock blocker list
 #endif
-				active = 1;
+			active = 1;
 		} else if (!active &&
 			   (!last_activity_ws ||
 			    ktime_to_ns(ws->last_time) >
@@ -1009,7 +1006,7 @@ EXPORT_SYMBOL_GPL(pm_system_wakeup);
 
 void pm_system_cancel_wakeup(void)
 {
-	atomic_dec(&pm_abort_suspend);
+	atomic_dec_if_positive(&pm_abort_suspend);
 }
 
 void pm_wakeup_clear(bool reset)

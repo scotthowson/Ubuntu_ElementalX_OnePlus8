@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (c) 2013-2019, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2013-2020, The Linux Foundation. All rights reserved.
  */
 
 #include <linux/atomic.h>
@@ -437,8 +437,10 @@ static struct ipa_ep_cfg usb_to_ipa_ep_cfg_deaggr_en = {
 	},
 	.deaggr = {
 		.deaggr_hdr_len = sizeof(struct rndis_pkt_hdr),
+		.syspipe_err_detection = true,
 		.packet_offset_valid = true,
 		.packet_offset_location = 8,
+		.ignore_min_pkt_err = true,
 		.max_packet_len = 8192, /* Will be overridden*/
 	},
 	.route = {
@@ -1431,7 +1433,7 @@ static void rndis_ipa_xmit_error(struct sk_buff *skb)
 	delay_jiffies = msecs_to_jiffies(
 		rndis_ipa_ctx->error_msec_sleep_time + rand_dealy_msec);
 
-	retval = schedule_delayed_work(
+	retval = queue_delayed_work(system_power_efficient_wq, 
 		&rndis_ipa_ctx->xmit_error_delayed_work, delay_jiffies);
 	if (!retval) {
 		RNDIS_IPA_ERROR("fail to schedule delayed work\n");

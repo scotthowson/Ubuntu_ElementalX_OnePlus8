@@ -394,7 +394,6 @@ typedef int (*dma_buf_destructor)(struct dma_buf *dmabuf, void *dtor_data);
  * @vmap_ptr: the current vmap ptr if vmapping_counter > 0
  * @exp_name: name of the exporter; useful for debugging.
  * @name: unique name for the buffer
- * @ktime: time (in jiffies) at which the buffer was born
  * @owner: pointer to exporter module; used for refcounting when exporter is a
  *         kernel module.
  * @list_node: node for dma_buf accounting and debugging.
@@ -423,7 +422,6 @@ struct dma_buf {
 	void *vmap_ptr;
 	const char *exp_name;
 	char *name;
-	ktime_t ktime;
 	struct module *owner;
 	struct list_head list_node;
 	void *priv;
@@ -442,6 +440,8 @@ struct dma_buf {
 	struct list_head refs;
 	dma_buf_destructor dtor;
 	void *dtor_data;
+
+	bool from_kmem;
 };
 
 /**

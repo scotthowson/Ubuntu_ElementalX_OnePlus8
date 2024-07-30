@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (c) 2012-2019, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2020, The Linux Foundation. All rights reserved.
  */
 
 #include "ipa_i.h"
@@ -8,8 +8,6 @@
 #include <linux/delay.h>
 #include <linux/mm.h>
 #include "ipa_qmi_service.h"
-
-#define IPA_HOLB_TMR_DIS 0x0
 
 #define IPA_HW_INTERFACE_WDI_VERSION 0x0001
 #define IPA_HW_WDI_RX_MBOX_START_INDEX 48
@@ -1172,7 +1170,7 @@ int ipa3_connect_gsi_wdi_pipe(struct ipa_wdi_in_params *in,
 	struct ipa_ep_cfg_ctrl ep_cfg_ctrl;
 	struct gsi_chan_props gsi_channel_props;
 	struct gsi_evt_ring_props gsi_evt_ring_props;
-	union __packed gsi_channel_scratch gsi_scratch;
+	union gsi_channel_scratch gsi_scratch;
 	phys_addr_t pa;
 	unsigned long va;
 	unsigned long wifi_rx_ri_addr = 0;
@@ -2197,6 +2195,7 @@ int ipa3_enable_gsi_wdi_pipe(u32 clnt_hdl)
 	struct ipa3_ep_context *ep;
 	struct ipa_ep_cfg_ctrl ep_cfg_ctrl;
 	int ipa_ep_idx;
+	struct ipa_ep_cfg_holb holb_cfg;
 
 	IPADBG("ep=%d\n", clnt_hdl);
 
@@ -2216,6 +2215,18 @@ int ipa3_enable_gsi_wdi_pipe(u32 clnt_hdl)
 
 	memset(&ep_cfg_ctrl, 0, sizeof(struct ipa_ep_cfg_ctrl));
 	ipa3_cfg_ep_ctrl(ipa_ep_idx, &ep_cfg_ctrl);
+
+	if (IPA_CLIENT_IS_CONS(ep->client)) {
+		memset(&holb_cfg, 0, sizeof(holb_cfg));
+		holb_cfg.en = IPA_HOLB_TMR_EN;
+		if (ipa3_ctx->ipa_hw_type < IPA_HW_v4_5)
+			holb_cfg.tmr_val = IPA_HOLB_TMR_VAL;
+		else
+			holb_cfg.tmr_val = IPA_HOLB_TMR_VAL_4_5;
+
+		result = ipa3_cfg_ep_holb(clnt_hdl, &holb_cfg);
+	}
+
 
 	IPA_ACTIVE_CLIENTS_DEC_EP(ipa3_get_client_mapping(clnt_hdl));
 	ep->gsi_offload_state |= IPA_WDI_ENABLED;
@@ -2468,7 +2479,7 @@ int ipa3_resume_gsi_wdi_pipe(u32 clnt_hdl)
 	struct ipa3_ep_context *ep;
 	struct ipa_ep_cfg_ctrl ep_cfg_ctrl;
 	struct gsi_chan_info chan_info;
-	union __packed gsi_channel_scratch gsi_scratch;
+	union gsi_channel_scratch gsi_scratch;
 	struct IpaHwOffloadStatsAllocCmdData_t *pcmd_t = NULL;
 
 	IPADBG("ep=%d\n", clnt_hdl);
@@ -2604,7 +2615,7 @@ int ipa3_suspend_gsi_wdi_pipe(u32 clnt_hdl)
 	struct ipahal_ep_cfg_ctrl_scnd ep_ctrl_scnd = { 0 };
 	int retry_cnt = 0;
 	struct gsi_chan_info chan_info;
-	union __packed gsi_channel_scratch gsi_scratch;
+	union gsi_channel_scratch gsi_scratch;
 	struct IpaHwOffloadStatsAllocCmdData_t *pcmd_t = NULL;
 
 	ipa_ep_idx = ipa3_get_ep_mapping(ipa3_get_client_mapping(clnt_hdl));

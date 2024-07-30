@@ -34,18 +34,9 @@
 static struct kmem_cache *memobjs_cache;
 static struct kmem_cache *sparseobjs_cache;
 
-static void free_fence_names(struct kgsl_drawobj_sync *syncobj)
-{
-	unsigned int i;
-
-	for (i = 0; i < syncobj->numsyncs; i++) {
-		struct kgsl_drawobj_sync_event *event = &syncobj->synclist[i];
-
-		if (event->type == KGSL_CMD_SYNCPOINT_TYPE_FENCE)
-			kfree(event->info.fences);
-	}
-}
-
+static struct kmem_cache *drawobj_sparse_cache;
+static struct kmem_cache *drawobj_sync_cache;
+static struct kmem_cache *drawobj_cmd_cache;
 void kgsl_drawobj_destroy_object(struct kref *kref)
 {
 	struct kgsl_drawobj *drawobj = container_of(kref,
@@ -57,16 +48,15 @@ void kgsl_drawobj_destroy_object(struct kref *kref)
 	switch (drawobj->type) {
 	case SYNCOBJ_TYPE:
 		syncobj = SYNCOBJ(drawobj);
-		free_fence_names(syncobj);
 		kfree(syncobj->synclist);
-		kfree(syncobj);
+		kmem_cache_free(drawobj_sync_cache, syncobj);
 		break;
 	case CMDOBJ_TYPE:
 	case MARKEROBJ_TYPE:
-		kfree(CMDOBJ(drawobj));
+		kmem_cache_free(drawobj_cmd_cache, CMDOBJ(drawobj));
 		break;
 	case SPARSEOBJ_TYPE:
-		kfree(SPARSEOBJ(drawobj));
+		kmem_cache_free(drawobj_sparse_cache, SPARSEOBJ(drawobj));
 		break;
 	}
 }
@@ -98,12 +88,6 @@ void kgsl_dump_syncpoints(struct kgsl_device *device,
 			break;
 		}
 		case KGSL_CMD_SYNCPOINT_TYPE_FENCE: {
-			int j;
-			struct event_fence_info *info = &event->info;
-
-			for (j = 0; j < info->num_fences; j++)
-				dev_err(device->dev, "[%d]  fence: %s\n",
-					i, info->fences[j].name);
 			break;
 		}
 		}
@@ -155,12 +139,6 @@ static void syncobj_timer(struct timer_list *t)
 				i, event->context->id, event->timestamp);
 			break;
 		case KGSL_CMD_SYNCPOINT_TYPE_FENCE: {
-			int j;
-			struct event_fence_info *info = &event->info;
-
-			for (j = 0; j < info->num_fences; j++)
-				dev_err(device->dev, "       [%u] FENCE %s\n",
-					i, info->fences[j].name);
 			break;
 		}
 		}
@@ -346,11 +324,6 @@ EXPORT_SYMBOL(kgsl_drawobj_destroy);
 static bool drawobj_sync_fence_func(void *priv)
 {
 	struct kgsl_drawobj_sync_event *event = priv;
-	int i;
-
-	for (i = 0; i < event->info.num_fences; i++)
-		trace_syncpoint_fence_expire(event->syncobj,
-			event->info.fences[i].name);
 
 	/*
 	 * Only call kgsl_drawobj_put() if it's not marked for cancellation
@@ -376,7 +349,7 @@ static int drawobj_add_sync_fence(struct kgsl_device *device,
 	struct kgsl_cmd_syncpoint_fence *sync = priv;
 	struct kgsl_drawobj *drawobj = DRAWOBJ(syncobj);
 	struct kgsl_drawobj_sync_event *event;
-	unsigned int id, i;
+	unsigned int id;
 
 	kref_get(&drawobj->refcount);
 
@@ -413,9 +386,6 @@ static int drawobj_add_sync_fence(struct kgsl_device *device,
 
 		return ret;
 	}
-
-	for (i = 0; i < event->info.num_fences; i++)
-		trace_syncpoint_fence(syncobj, event->info.fences[i].name);
 
 	return 0;
 }
@@ -671,11 +641,26 @@ int kgsl_drawobj_cmd_add_ibdesc(struct kgsl_device *device,
 }
 
 static void *_drawobj_create(struct kgsl_device *device,
-	struct kgsl_context *context, unsigned int size,
-	unsigned int type)
+	struct kgsl_context *context, unsigned int type)
 {
-	void *obj = kzalloc(size, GFP_KERNEL);
+	void *obj;
 	struct kgsl_drawobj *drawobj;
+
+	switch (type) {
+	case SYNCOBJ_TYPE:
+		obj = kmem_cache_zalloc(drawobj_sync_cache, GFP_KERNEL);
+		break;
+	case CMDOBJ_TYPE:
+	case MARKEROBJ_TYPE:
+		obj = kmem_cache_zalloc(drawobj_cmd_cache, GFP_KERNEL);
+		break;
+	case SPARSEOBJ_TYPE:
+		obj = kmem_cache_zalloc(drawobj_sparse_cache, GFP_KERNEL);
+		break;
+	default:
+		// noop
+		return ERR_PTR(-ENOMEM);
+	}
 
 	if (obj == NULL)
 		return ERR_PTR(-ENOMEM);
@@ -685,7 +670,18 @@ static void *_drawobj_create(struct kgsl_device *device,
 	 * during the lifetime of this object
 	 */
 	if (!_kgsl_context_get(context)) {
-		kfree(obj);
+		switch (type) {
+		case SYNCOBJ_TYPE:
+			kmem_cache_free(drawobj_sync_cache, obj);
+			break;
+		case CMDOBJ_TYPE:
+		case MARKEROBJ_TYPE:
+			kmem_cache_free(drawobj_cmd_cache, obj);
+			break;
+		case SPARSEOBJ_TYPE:
+			kmem_cache_free(drawobj_sparse_cache, obj);
+			break;
+		}
 		return ERR_PTR(-ENOENT);
 	}
 
@@ -713,7 +709,7 @@ struct kgsl_drawobj_sparse *kgsl_drawobj_sparse_create(
 		struct kgsl_context *context, unsigned int flags)
 {
 	struct kgsl_drawobj_sparse *sparseobj = _drawobj_create(device,
-		context, sizeof(*sparseobj), SPARSEOBJ_TYPE);
+		context, SPARSEOBJ_TYPE);
 
 	if (!IS_ERR(sparseobj))
 		INIT_LIST_HEAD(&sparseobj->sparselist);
@@ -733,7 +729,7 @@ struct kgsl_drawobj_sync *kgsl_drawobj_sync_create(struct kgsl_device *device,
 		struct kgsl_context *context)
 {
 	struct kgsl_drawobj_sync *syncobj = _drawobj_create(device,
-		context, sizeof(*syncobj), SYNCOBJ_TYPE);
+		context, SYNCOBJ_TYPE);
 
 	/* Add a timer to help debug sync deadlocks */
 	if (!IS_ERR(syncobj))
@@ -757,8 +753,7 @@ struct kgsl_drawobj_cmd *kgsl_drawobj_cmd_create(struct kgsl_device *device,
 		unsigned int type)
 {
 	struct kgsl_drawobj_cmd *cmdobj = _drawobj_create(device,
-		context, sizeof(*cmdobj),
-		(type & (CMDOBJ_TYPE | MARKEROBJ_TYPE)));
+		context, (type & (CMDOBJ_TYPE | MARKEROBJ_TYPE)));
 
 	if (!IS_ERR(cmdobj)) {
 		/* sanitize our flags for drawobj's */
@@ -1153,14 +1148,23 @@ void kgsl_drawobjs_cache_exit(void)
 {
 	kmem_cache_destroy(memobjs_cache);
 	kmem_cache_destroy(sparseobjs_cache);
+
+	kmem_cache_destroy(drawobj_sparse_cache);
+	kmem_cache_destroy(drawobj_sync_cache);
+	kmem_cache_destroy(drawobj_cmd_cache);
 }
 
 int kgsl_drawobjs_cache_init(void)
 {
-	memobjs_cache = KMEM_CACHE(kgsl_memobj_node, 0);
-	sparseobjs_cache = KMEM_CACHE(kgsl_sparseobj_node, 0);
+	memobjs_cache = KMEM_CACHE(kgsl_memobj_node, SLAB_HWCACHE_ALIGN);
+	sparseobjs_cache = KMEM_CACHE(kgsl_sparseobj_node, SLAB_HWCACHE_ALIGN);
 
-	if (!memobjs_cache || !sparseobjs_cache)
+	drawobj_sparse_cache = KMEM_CACHE(kgsl_drawobj_sparse, SLAB_HWCACHE_ALIGN);
+	drawobj_sync_cache = KMEM_CACHE(kgsl_drawobj_sync, SLAB_HWCACHE_ALIGN);
+	drawobj_cmd_cache = KMEM_CACHE(kgsl_drawobj_cmd, SLAB_HWCACHE_ALIGN);
+
+	if (!memobjs_cache || !sparseobjs_cache ||
+	    !drawobj_sparse_cache || !drawobj_sync_cache || !drawobj_cmd_cache)
 		return -ENOMEM;
 
 	return 0;

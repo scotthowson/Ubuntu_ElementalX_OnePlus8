@@ -3147,8 +3147,8 @@ vm_fault_t do_swap_page(struct vm_fault *vmf)
 
 	if (!page) {
 		if (skip_swapcache) {
-			page = alloc_page_vma(GFP_HIGHUSER_MOVABLE, vma,
-							vmf->address);
+			page = alloc_page_vma(GFP_HIGHUSER_MOVABLE | __GFP_CMA,
+					      vma, vmf->address);
 			if (page) {
 				__SetPageLocked(page);
 				__SetPageSwapBacked(page);
@@ -4388,7 +4388,7 @@ static vm_fault_t __handle_mm_fault(struct vm_area_struct *vma,
 	vmf.pud = pud_alloc(mm, p4d, address);
 	if (!vmf.pud)
 		return VM_FAULT_OOM;
-	if (pud_none(*vmf.pud) && transparent_hugepage_enabled(vma)) {
+	if (pud_none(*vmf.pud) && __transparent_hugepage_enabled(vma)) {
 		ret = create_huge_pud(&vmf);
 		if (!(ret & VM_FAULT_FALLBACK))
 			return ret;
@@ -4417,7 +4417,7 @@ static vm_fault_t __handle_mm_fault(struct vm_area_struct *vma,
 #ifdef CONFIG_SPECULATIVE_PAGE_FAULT
 	vmf.sequence = raw_read_seqcount(&vma->vm_sequence);
 #endif
-	if (pmd_none(*vmf.pmd) && transparent_hugepage_enabled(vma)) {
+	if (pmd_none(*vmf.pmd) && __transparent_hugepage_enabled(vma)) {
 		ret = create_huge_pmd(&vmf);
 		if (!(ret & VM_FAULT_FALLBACK))
 			return ret;
