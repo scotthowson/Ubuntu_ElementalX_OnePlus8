@@ -1,5 +1,5 @@
 ifeq ($(CONFIG_BUILD_ARM64_DT_OVERLAY_NOT_OEM),y)
-        dtbo-$(CONFIG_ARCH_KONA) += \
+        #dtbo-$(CONFIG_ARCH_KONA) += \
                 kona-cdp-overlay.dtbo \
                 kona-cdp-lcd-overlay.dtbo \
                 kona-mtp-overlay.dtbo \
@@ -17,7 +17,7 @@ kona-qrd-overlay.dtbo-base := kona.dtb kona-v2.dtb kona-v2.1.dtb
 kona-hdk-overlay.dtbo-base := kona.dtb kona-v2.dtb kona-v2.1.dtb
 else
 ifeq ($(CONFIG_BUILD_ARM64_DT_OVERLAY),y)
-        dtbo-$(CONFIG_ARCH_KONA) += \
+        #dtbo-$(CONFIG_ARCH_KONA) += \
                 instantnoodlep-overlay-evb.dtbo \
                 instantnoodlep-overlay-t0.dtbo \
                 instantnoodlep-overlay-evt1.dtbo \
@@ -43,7 +43,7 @@ instantnoodlev-overlay-evt1.dtbo-base := kona.dtb kona-v2.dtb kona-v2.1.dtb
 instantnoodlev-overlay-dvt.dtbo-base := kona.dtb kona-v2.dtb kona-v2.1.dtb
 
 else
-dtb-$(CONFIG_ARCH_KONA) += kona-rumi.dtb \
+#dtb-$(CONFIG_ARCH_KONA) += kona-rumi.dtb \
         kona-mtp.dtb \
         kona-mtp-ws.dtb \
         kona-cdp.dtb \
