@@ -33,9 +33,9 @@ endif # platform-sdk-version
 # Build wlan.ko as $(WLAN_CHIPSET)_wlan.ko
 ###########################################################
 # This is set once per LOCAL_PATH, not per (kernel) module
-KBUILD_OPTIONS := WLAN_ROOT=$(WLAN_BLD_DIR)/wlan-qc/qcacld-3.0
+KBUILD_OPTIONS := WLAN_ROOT=$(WLAN_BLD_DIR)/qcacld-3.0
 KBUILD_OPTIONS += WLAN_COMMON_ROOT=../qca-wifi-host-cmn
-KBUILD_OPTIONS += WLAN_COMMON_INC=$(WLAN_BLD_DIR)/wlan-qc/qca-wifi-host-cmn
+KBUILD_OPTIONS += WLAN_COMMON_INC=$(WLAN_BLD_DIR)/qca-wifi-host-cmn
 
 # We are actually building wlan.ko here, as per the
 # requirement we are specifying <chipset>_wlan.ko as LOCAL_MODULE.
