@@ -1251,7 +1251,8 @@ static inline __u32 skb_get_hash_flowi6(struct sk_buff *skb, const struct flowi6
 	return skb->hash;
 }
 
-__u32 skb_get_hash_perturb(const struct sk_buff *skb, u32 perturb);
+__u32 skb_get_hash_perturb(const struct sk_buff *skb,
+			   const siphash_key_t *perturb);
 
 static inline __u32 skb_get_hash_raw(const struct sk_buff *skb)
 {
@@ -1379,6 +1380,19 @@ static inline int skb_queue_empty(const struct sk_buff_head *list)
 	return list->next == (const struct sk_buff *) list;
 }
 
+/**
+ *	skb_queue_empty_lockless - check if a queue is empty
+ *	@list: queue head
+ *
+ *	Returns true if the queue is empty, false otherwise.
+ *	This variant can be used in lockless contexts.
+ */
+ static inline bool skb_queue_empty_lockless(const struct sk_buff_head *list)
+ {
+	 return READ_ONCE(list->next) == (const struct sk_buff *) list;
+ }
+ 
+ 
 /**
  *	skb_queue_is_last - check if skb is the last entry in the queue
  *	@list: queue head
