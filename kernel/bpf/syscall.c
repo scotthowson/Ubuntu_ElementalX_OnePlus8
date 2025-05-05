@@ -1605,7 +1605,7 @@ static int bpf_prog_attach(const union bpf_attr *attr)
 	struct bpf_prog *prog;
 	int ret;
 
-	if (!capable(CAP_NET_ADMIN))
+	if (!capable(CAP_NET_ADMIN) && !capable(CAP_SYS_ADMIN))
 		return -EPERM;
 
 	if (CHECK_ATTR(BPF_PROG_ATTACH))
@@ -1686,7 +1686,7 @@ static int bpf_prog_detach(const union bpf_attr *attr)
 {
 	enum bpf_prog_type ptype;
 
-	if (!capable(CAP_NET_ADMIN))
+	if (!capable(CAP_NET_ADMIN) && !capable(CAP_SYS_ADMIN))
 		return -EPERM;
 
 	if (CHECK_ATTR(BPF_PROG_DETACH))
@@ -1737,8 +1737,9 @@ static int bpf_prog_detach(const union bpf_attr *attr)
 static int bpf_prog_query(const union bpf_attr *attr,
 			  union bpf_attr __user *uattr)
 {
-	if (!capable(CAP_NET_ADMIN))
+	if (!capable(CAP_NET_ADMIN) && !capable(CAP_SYS_ADMIN))
 		return -EPERM;
+
 	if (CHECK_ATTR(BPF_PROG_QUERY))
 		return -EINVAL;
 	if (attr->query.query_flags & ~BPF_F_QUERY_EFFECTIVE)
