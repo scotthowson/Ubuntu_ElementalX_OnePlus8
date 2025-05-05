@@ -361,6 +361,7 @@ static void aafs_remove(struct dentry *dentry)
 			simple_rmdir(dir, dentry);
 		else
 			simple_unlink(dir, dentry);
+		d_delete(dentry);
 		dput(dentry);
 	}
 	inode_unlock(dir);
@@ -592,7 +593,7 @@ static __poll_t ns_revision_poll(struct file *file, poll_table *pt)
 
 void __aa_bump_ns_revision(struct aa_ns *ns)
 {
-	ns->revision++;
+	WRITE_ONCE(ns->revision, ns->revision + 1);
 	wake_up_interruptible(&ns->wait);
 }
 
@@ -604,6 +605,7 @@ static const struct file_operations aa_fs_ns_revision_fops = {
 	.llseek		= generic_file_llseek,
 	.release	= ns_revision_release,
 };
+
 
 /**
  * query_data - queries a policy and writes its data to buf
@@ -759,7 +761,7 @@ static ssize_t query_label(char *buf, size_t buf_len,
 			state = aa_dfa_match_len(dfa, profile->file.start,
 						 match_str + 1, match_len - 1);
 		} else if (profile->policy.dfa) {
-			if (!PROFILE_MEDIATES_SAFE(profile, *match_str))
+			if (!PROFILE_MEDIATES(profile, *match_str))
 				continue;	/* no change to current perms */
 			dfa = profile->policy.dfa;
 			state = aa_dfa_match_len(dfa, profile->policy.start[0],
@@ -2260,6 +2262,7 @@ static struct aa_sfs_entry aa_sfs_entry_features[] = {
 	AA_SFS_DIR("domain",			aa_sfs_entry_domain),
 	AA_SFS_DIR("file",			aa_sfs_entry_file),
 	AA_SFS_DIR("network_v8",		aa_sfs_entry_network),
+	AA_SFS_DIR("network",			aa_sfs_entry_network_compat),
 	AA_SFS_DIR("mount",			aa_sfs_entry_mount),
 	AA_SFS_DIR("namespaces",		aa_sfs_entry_ns),
 	AA_SFS_FILE_U64("capability",		VFS_CAP_FLAGS_MASK),
