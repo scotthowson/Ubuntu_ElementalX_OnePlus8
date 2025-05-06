@@ -63,6 +63,33 @@ dtb-$(CONFIG_ARCH_KONA) += kona-rumi.dtb \
 endif
 endif
 
+ifeq ($(CONFIG_ARCH_HOWSON),y)
+        dtbo-$(CONFIG_ARCH_KONA) += \
+                instantnoodlep-howson-overlay-evb.dtbo \
+                instantnoodlep-howson-overlay-t0.dtbo \
+                instantnoodlep-howson-overlay-evt1.dtbo \
+                instantnoodlep-howson-overlay-dvt.dtbo \
+                instantnoodle-howson-overlay-t0.dtbo \
+                instantnoodle-howson-overlay-evt1.dtbo \
+                instantnoodle-howson-overlay-dvt.dtbo \
+                instantnoodlev-howson-overlay-t0.dtbo \
+                instantnoodlev-howson-overlay-evt1.dtbo \
+                instantnoodlev-howson-overlay-dvt.dtbo
+
+instantnoodlep-howson-overlay-evb.dtbo-base := kona.dtb kona-v2.dtb kona-v2.1.dtb
+instantnoodlep-howson-overlay-t0.dtbo-base := kona.dtb kona-v2.dtb kona-v2.1.dtb
+instantnoodlep-howson-overlay-evt1.dtbo-base := kona.dtb kona-v2.dtb kona-v2.1.dtb
+instantnoodlep-howson-overlay-dvt.dtbo-base := kona.dtb kona-v2.dtb kona-v2.1.dtb
+
+instantnoodle-howson-overlay-t0.dtbo-base := kona.dtb kona-v2.dtb kona-v2.1.dtb
+instantnoodle-howson-overlay-evt1.dtbo-base := kona.dtb kona-v2.dtb kona-v2.1.dtb
+instantnoodle-howson-overlay-dvt.dtbo-base := kona.dtb kona-v2.dtb kona-v2.1.dtb
+
+instantnoodlev-howson-overlay-t0.dtbo-base := kona.dtb kona-v2.dtb kona-v2.1.dtb
+instantnoodlev-howson-overlay-evt1.dtbo-base := kona.dtb kona-v2.dtb kona-v2.1.dtb
+instantnoodlev-howson-overlay-dvt.dtbo-base := kona.dtb kona-v2.dtb kona-v2.1.dtb
+endif
+
 ifeq ($(CONFIG_BUILD_ARM64_DT_OVERLAY),y)
 dtbo-$(CONFIG_ARCH_LITO) += lito-rumi-overlay.dtbo \
                 lito-mtp-overlay.dtbo \

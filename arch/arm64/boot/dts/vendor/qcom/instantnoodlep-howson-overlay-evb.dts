@@ -1,0 +1,28 @@
+/dts-v1/;
+/plugin/;
+
+#include <dt-bindings/clock/qcom,gcc-kona.h>
+#include <dt-bindings/clock/qcom,camcc-kona.h>
+#include <dt-bindings/clock/qcom,rpmh.h>
+#include <dt-bindings/interrupt-controller/arm-gic.h>
+
+#include "kona-mtp.dtsi"
+#include "kona-oem.dtsi"
+#include "instantnoodlep.dtsi"
+#include "instantnoodlep_evb.dtsi"
+#include "camera/kona-oem-camera-instantnoodlep.dtsi"
+
+/ {
+    /* HOWSON-lep-evb specific overlay */
+};
+
+fragment@0 {
+    target-path = "/";
+    __overlay__ {
+        model = "Qualcomm Technologies, Inc. kona MTP evb 19811 55";
+        compatible = "qcom,kona-mtp", "qcom,kona", "qcom,mtp";
+        qcom,board-id = <8 0>;
+        oem,project-id = <19811>;
+        oem,hw-id = <55>;
+    };
+};

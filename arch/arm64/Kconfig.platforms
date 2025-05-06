@@ -158,6 +158,15 @@ config ARCH_KONA
 	  This enables support for the KONA chipset. If you do not
 	  wish to build a kernel that runs on this chipset, say 'N' here.\
 
+config ARCH_HOWSON
+	bool "Scott Howson's Ubuntu Touch Port for OnePlus 8/8 Pro"
+	depends on ARCH_QCOM
+	select ARCH_KONA
+	help
+	  This enables support for Ubuntu Touch on OnePlus 8 and 8 Pro devices.
+	  It's optimized for Wi-Fi and Bluetooth functionality while removing
+	  unnecessary components for cleaner integration.
+
 config ARCH_LITO
 	bool "Enable Support for Qualcomm Technologies, Inc. LITO"
 	depends on ARCH_QCOM
