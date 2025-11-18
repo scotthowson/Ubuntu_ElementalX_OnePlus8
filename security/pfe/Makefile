@@ -4,4 +4,4 @@ ccflags-y += -Ifs/crypto
 ccflags-y += -Idrivers/misc
 
 obj-$(CONFIG_PFT) += pft.o
-obj-$(CONFIG_PFK) += pfk.o pfk_kc.o pfk_ice.o pfk_ext4.o pfk_f2fs.o
+obj-$(CONFIG_PFK) += pfk.o pfk_kc.o pfk_ice.o #pfk_ext4.o pfk_f2fs.o

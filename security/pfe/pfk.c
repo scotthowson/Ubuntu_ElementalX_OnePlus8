@@ -82,8 +82,10 @@ static const pfk_allow_merge_bio_type pfk_allow_merge_bio_ftable[] = {
 static void __exit pfk_exit(void)
 {
 	pfk_ready = false;
+#if 0
 	pfk_ext4_deinit();
 	pfk_f2fs_deinit();
+#endif
 	pfk_kc_deinit();
 }
 
@@ -91,6 +93,7 @@ static int __init pfk_init(void)
 {
 	int ret = 0;
 
+#if 0
 	ret = pfk_ext4_init();
 	if (ret != 0)
 		goto fail;
@@ -98,6 +101,7 @@ static int __init pfk_init(void)
 	ret = pfk_f2fs_init();
 	if (ret != 0)
 		goto fail;
+#endif
 
 	pfk_ready = true;
 	pr_debug("Driver initialized successfully\n");
@@ -118,11 +122,13 @@ static enum pfe_type pfk_get_pfe_type(const struct inode *inode)
 	if (!inode)
 		return INVALID_PFE;
 
+#if 0
 	if (pfk_is_ext4_type(inode))
 		return EXT4_CRYPT_PFE;
 
 	if (pfk_is_f2fs_type(inode))
 		return F2FS_CRYPT_PFE;
+#endif
 
 	return INVALID_PFE;
 }
