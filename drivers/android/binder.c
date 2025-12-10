@@ -75,10 +75,10 @@
 #include <uapi/linux/android/binder.h>
 #include <uapi/linux/sched/types.h>
 
-#include <linux/oem/im.h>
-
 #include <asm/cacheflush.h>
-
+#ifdef CONFIG_IM
+#include <linux/oem/im.h>
+#endif
 #include "binder_alloc.h"
 #include "binder_trace.h"
 
@@ -291,7 +291,7 @@ struct binder_device {
 struct binder_work {
 	struct list_head entry;
 
-	enum {
+	enum binder_work_type {
 		BINDER_WORK_TRANSACTION = 1,
 		BINDER_WORK_TRANSACTION_COMPLETE,
 		BINDER_WORK_RETURN_ERROR,
@@ -876,6 +876,7 @@ static void
 binder_enqueue_deferred_thread_work_ilocked(struct binder_thread *thread,
 					    struct binder_work *work)
 {
+	WARN_ON(!list_empty(&thread->waiting_thread_node));
 	binder_enqueue_work_ilocked(work, &thread->todo);
 }
 
@@ -893,6 +894,7 @@ static void
 binder_enqueue_thread_work_ilocked(struct binder_thread *thread,
 				   struct binder_work *work)
 {
+	WARN_ON(!list_empty(&thread->waiting_thread_node));
 	binder_enqueue_work_ilocked(work, &thread->todo);
 	thread->process_todo = true;
 }
@@ -944,27 +946,6 @@ static struct binder_work *binder_dequeue_work_head_ilocked(
 	w = list_first_entry_or_null(list, struct binder_work, entry);
 	if (w)
 		list_del_init(&w->entry);
-	return w;
-}
-
-/**
- * binder_dequeue_work_head() - Dequeues the item at head of list
- * @proc:         binder_proc associated with list
- * @list:         list to dequeue head
- *
- * Removes the head of the list if there are items on the list
- *
- * Return: pointer dequeued binder_work, NULL if list was empty
- */
-static struct binder_work *binder_dequeue_work_head(
-					struct binder_proc *proc,
-					struct list_head *list)
-{
-	struct binder_work *w;
-
-	binder_inner_proc_lock(proc);
-	w = binder_dequeue_work_head_ilocked(list);
-	binder_inner_proc_unlock(proc);
 	return w;
 }
 
@@ -1199,10 +1180,10 @@ static void binder_do_set_priority(struct task_struct *task,
 	int priority; /* user-space prio value */
 	bool has_cap_nice;
 	unsigned int policy = desired.sched_policy;
-
+#ifdef CONFIG_IM
 	if (im_hwc(task) || task->prio < MAX_RT_PRIO)
 		return;
-
+#endif
 	if (task->policy == policy && task->normal_prio == desired.prio)
 		return;
 
@@ -1456,19 +1437,12 @@ static int binder_inc_node_nilocked(struct binder_node *node, int strong,
 		} else
 			node->local_strong_refs++;
 		if (!node->has_strong_ref && target_list) {
+			struct binder_thread *thread = container_of(target_list,
+						    struct binder_thread, todo);
 			binder_dequeue_work_ilocked(&node->work);
-			/*
-			 * Note: this function is the only place where we queue
-			 * directly to a thread->todo without using the
-			 * corresponding binder_enqueue_thread_work() helper
-			 * functions; in this case it's ok to not set the
-			 * process_todo flag, since we know this node work will
-			 * always be followed by other work that starts queue
-			 * processing: in case of synchronous transactions, a
-			 * BR_REPLY or BR_ERROR; in case of oneway
-			 * transactions, a BR_TRANSACTION_COMPLETE.
-			 */
-			binder_enqueue_work_ilocked(&node->work, target_list);
+			BUG_ON(&thread->todo != target_list);
+			binder_enqueue_deferred_thread_work_ilocked(thread,
+								   &node->work);
 		}
 	} else {
 		if (!internal)
@@ -2932,6 +2906,7 @@ static bool binder_proc_transaction(struct binder_transaction *t,
 		} else {
 			node->has_async_transaction = true;
 		}
+	}
 
 	binder_inner_proc_lock(proc);
 
@@ -2948,6 +2923,19 @@ static bool binder_proc_transaction(struct binder_transaction *t,
 		binder_transaction_priority(thread->task, t, node_prio,
 					    node->inherit_rt);
 		binder_enqueue_thread_work_ilocked(thread, &t->work);
+#ifdef CONFIG_UXCHAIN
+		if (!oneway && sysctl_uxchain_enabled && t->from && t->from->task
+			&& t->from->task->static_ux) {
+			thread->task->dynamic_ux = 1;
+			thread->task->ux_depth = t->from->task->ux_depth + 1;
+		}
+		if (!oneway && sysctl_uxchain_enabled &&
+			t->from && t->from->task &&
+			t->from->task->dynamic_ux /*&& t->from->task->ux_depth < 2*/) {
+			thread->task->dynamic_ux = 1;
+			thread->task->ux_depth = t->from->task->ux_depth + 1;
+		}
+#endif
 	} else if (!pending_async) {
 		binder_enqueue_work_ilocked(&t->work, &proc->todo);
 	} else {
@@ -3012,6 +3000,7 @@ static void binder_transaction(struct binder_proc *proc,
 {
 	int ret;
 	struct binder_transaction *t;
+	struct binder_work *w;
 	struct binder_work *tcomplete;
 	binder_size_t buffer_offset = 0;
 	binder_size_t off_start_offset, off_end_offset;
@@ -3155,6 +3144,29 @@ static void binder_transaction(struct binder_proc *proc,
 			goto err_invalid_target_handle;
 		}
 		binder_inner_proc_lock(proc);
+
+		w = list_first_entry_or_null(&thread->todo,
+					     struct binder_work, entry);
+		if (!(tr->flags & TF_ONE_WAY) && w &&
+		    w->type == BINDER_WORK_TRANSACTION) {
+			/*
+			 * Do not allow new outgoing transaction from a
+			 * thread that has a transaction at the head of
+			 * its todo list. Only need to check the head
+			 * because binder_select_thread_ilocked picks a
+			 * thread from proc->waiting_threads to enqueue
+			 * the transaction, and nothing is queued to the
+			 * todo list while the thread is on waiting_threads.
+			 */
+			binder_user_error("%d:%d new transaction not allowed when there is a transaction on thread todo\n",
+					  proc->pid, thread->pid);
+			binder_inner_proc_unlock(proc);
+			return_error = BR_FAILED_REPLY;
+			return_error_param = -EPROTO;
+			return_error_line = __LINE__;
+			goto err_bad_todo_list;
+		}
+
 		if (!(tr->flags & TF_ONE_WAY) && thread->transaction_stack) {
 			struct binder_transaction *tmp;
 
@@ -3266,7 +3278,15 @@ static void binder_transaction(struct binder_proc *proc,
 			return_error_line = __LINE__;
 			goto err_get_secctx_failed;
 		}
-		extra_buffers_size += ALIGN(secctx_sz, sizeof(u64));
+		added_size = ALIGN(secctx_sz, sizeof(u64));
+		extra_buffers_size += added_size;
+		if (extra_buffers_size < added_size) {
+			/* integer overflow of extra_buffers_size */
+			return_error = BR_FAILED_REPLY;
+			return_error_param = EINVAL;
+			return_error_line = __LINE__;
+			goto err_bad_extra_size;
+		}
 	}
 
 	trace_binder_transaction(reply, t, target_node);
@@ -3357,7 +3377,7 @@ static void binder_transaction(struct binder_proc *proc,
 #ifdef CONFIG_OPCHAIN
 	// morison.yan@ASTI, 2019/4/29, add for uxrealm CONFIG_OPCHAIN
 	binder_alloc_pass_binder_buffer(&target_proc->alloc,
-					t->buffer, tr->data_size);
+			t->buffer, tr->data_size);
 #endif
 	for (buffer_offset = off_start_offset; buffer_offset < off_end_offset;
 	     buffer_offset += sizeof(binder_size_t)) {
@@ -3548,6 +3568,13 @@ static void binder_transaction(struct binder_proc *proc,
 	tcomplete->type = BINDER_WORK_TRANSACTION_COMPLETE;
 	t->work.type = BINDER_WORK_TRANSACTION;
 
+#ifdef CONFIG_UXCHAIN
+	if (sysctl_uxchain_enabled && thread->task->dynamic_ux) {
+		thread->task->dynamic_ux = 0;
+		thread->task->ux_depth = 0;
+	}
+#endif
+
 	if (reply) {
 		binder_enqueue_thread_work(thread, tcomplete);
 		binder_inner_proc_lock(target_proc);
@@ -3621,6 +3648,7 @@ err_copy_data_failed:
 	t->buffer->transaction = NULL;
 	binder_alloc_free_buf(&target_proc->alloc, t->buffer);
 err_binder_alloc_buf_failed:
+err_bad_extra_size:
 	if (secctx)
 		security_release_secctx(secctx, secctx_sz);
 err_get_secctx_failed:
@@ -3630,6 +3658,7 @@ err_alloc_tcomplete_failed:
 	kfree(t);
 	binder_stats_deleted(BINDER_STAT_TRANSACTION);
 err_alloc_t_failed:
+err_bad_todo_list:
 err_bad_call_stack:
 err_empty_call_stack:
 err_dead_binder:
@@ -4498,8 +4527,21 @@ retry:
 			trd->sender_pid =
 				task_tgid_nr_ns(sender,
 						task_active_pid_ns(current));
-				if (binder_global_pid_lookups && trd->sender_pid == 0)
-					trd->sender_pid = task_tgid_nr(sender);
+			if (binder_global_pid_lookups && trd->sender_pid == 0)
+				trd->sender_pid = task_tgid_nr(sender);
+
+#ifdef CONFIG_UXCHAIN
+			if (sysctl_uxchain_enabled && t_from && t_from->task &&
+				t_from->task->static_ux) {
+				thread->task->dynamic_ux = 1;
+				thread->task->ux_depth = t_from->task->ux_depth + 1;
+			}
+			if (sysctl_uxchain_enabled && t_from && t_from->task &&
+				t_from->task->dynamic_ux /*&& t->from->task->ux_depth < 2*/) {
+				thread->task->dynamic_ux = 1;
+				thread->task->ux_depth = t_from->task->ux_depth + 1;
+			}
+#endif
 		} else {
 			trd->sender_pid = 0;
 		}
@@ -4593,13 +4635,17 @@ static void binder_release_work(struct binder_proc *proc,
 				struct list_head *list)
 {
 	struct binder_work *w;
+	enum binder_work_type wtype;
 
 	while (1) {
-		w = binder_dequeue_work_head(proc, list);
+		binder_inner_proc_lock(proc);
+		w = binder_dequeue_work_head_ilocked(list);
+		wtype = w ? w->type : 0;
+		binder_inner_proc_unlock(proc);
 		if (!w)
 			return;
 
-		switch (w->type) {
+		switch (wtype) {
 		case BINDER_WORK_TRANSACTION: {
 			struct binder_transaction *t;
 
@@ -4633,9 +4679,11 @@ static void binder_release_work(struct binder_proc *proc,
 			kfree(death);
 			binder_stats_deleted(BINDER_STAT_DEATH);
 		} break;
+		case BINDER_WORK_NODE:
+			break;
 		default:
 			pr_err("unexpected work type, %d, not freed\n",
-			       w->type);
+			       wtype);
 			break;
 		}
 	}
