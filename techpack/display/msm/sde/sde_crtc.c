@@ -5086,13 +5086,20 @@ static int sde_crtc_onscreenfinger_atomic_check(struct sde_crtc_state *cstate,
 			SDE_ERROR("Failed to config dim layer\n");
 			return -EINVAL;
 		}
-		if (fppressed_index >= 0)
+		/*
+		 * Ubuntu Touch UDFPS: Also set fingerprint_pressed when
+		 * oneplus_onscreenfp_status is set via notify_fppress sysfs.
+		 * On stock Android, fppressed_index requires a DRM plane with
+		 * PLANE_PROP_CUSTOM==2 from SurfaceFlinger. Ubuntu Touch has
+		 * no SurfaceFlinger, so we also honor the sysfs signal.
+		 */
+		if (fppressed_index >= 0 || oneplus_onscreenfp_status)
 			cstate->fingerprint_pressed = true;
 		else {
 			cstate->fingerprint_pressed = false;
 		}
 	} else{
-	cstate->fingerprint_pressed = false;
+	cstate->fingerprint_pressed = oneplus_onscreenfp_status ? true : false;
 	cstate->fingerprint_mode = false;
     }
 	if (fp_index < 0 && !dim_backlight) {

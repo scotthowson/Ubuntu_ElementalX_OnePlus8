@@ -653,8 +653,81 @@ static ssize_t screen_state_get(struct device *device,
 
 static DEVICE_ATTR(screen_state, 0400, screen_state_get, NULL);
 
+/*
+ * Ubuntu Touch UDFPS support: sysfs nodes to inject netlink events.
+ *
+ * On stock Android, the fingerprint HAL receives GF_NET_EVENT_UI_READY (6)
+ * and GF_NET_EVENT_TP_TOUCHDOWN (4) via netlink from the kernel. UI_READY
+ * is triggered by a DRM plane property set by SurfaceFlinger, and TOUCHDOWN
+ * is triggered by the touchscreen's TOUCHHOLD event.
+ *
+ * Ubuntu Touch has neither SurfaceFlinger nor the Samsung TOUCHHOLD pipeline,
+ * so these events never reach the HAL. These sysfs nodes allow userspace
+ * (e.g. a fingerprint helper daemon) to inject the events directly.
+ *
+ * Usage:
+ *   echo 6 > /sys/devices/platform/.../goodix_fp/send_net_event  # UI_READY
+ *   echo 4 > /sys/devices/platform/.../goodix_fp/send_net_event  # TOUCHDOWN
+ *   echo 5 > /sys/devices/platform/.../goodix_fp/send_net_event  # TOUCHUP
+ *
+ *   # Or send touchdown with coordinates (x,y):
+ *   echo "1 540 1800" > /sys/devices/platform/.../goodix_fp/notify_touchdown
+ *   echo "0 540 1800" > /sys/devices/platform/.../goodix_fp/notify_touchdown
+ */
+static ssize_t send_net_event_store(struct device *device,
+			struct device_attribute *attribute,
+			const char *buf, size_t count)
+{
+	char msg;
+	int event = 0;
+
+	if (sscanf(buf, "%d", &event) != 1)
+		return -EINVAL;
+
+	if (event < GF_NET_EVENT_IRQ || event > GF_NET_EVENT_UI_DISAPPEAR) {
+		pr_err("goodix_fp: invalid event %d (valid: %d-%d)\n",
+		       event, GF_NET_EVENT_IRQ, GF_NET_EVENT_UI_DISAPPEAR);
+		return -EINVAL;
+	}
+
+	msg = (char)event;
+	pr_info("goodix_fp: injecting net event %d\n", event);
+	sendnlmsg(&msg);
+
+	return count;
+}
+
+static DEVICE_ATTR(send_net_event, 0220, NULL, send_net_event_store);
+
+static ssize_t notify_touchdown_store(struct device *device,
+			struct device_attribute *attribute,
+			const char *buf, size_t count)
+{
+	struct fp_underscreen_info tp_info;
+	int touch_state = 0;
+	int x = 0, y = 0;
+
+	if (sscanf(buf, "%d %d %d", &touch_state, &x, &y) < 1)
+		return -EINVAL;
+
+	tp_info.touch_state = touch_state ? GF_NET_EVENT_TP_TOUCHDOWN
+					  : GF_NET_EVENT_TP_TOUCHUP;
+	tp_info.x = (uint16_t)x;
+	tp_info.y = (uint16_t)y;
+
+	pr_info("goodix_fp: injecting tp event state=%d x=%d y=%d\n",
+		touch_state, x, y);
+	sendnlmsg_tp(&tp_info, sizeof(tp_info));
+
+	return count;
+}
+
+static DEVICE_ATTR(notify_touchdown, 0220, NULL, notify_touchdown_store);
+
 static struct attribute *gf_attributes[] = {
 	&dev_attr_screen_state.attr,
+	&dev_attr_send_net_event.attr,
+	&dev_attr_notify_touchdown.attr,
 	NULL
 };
 
