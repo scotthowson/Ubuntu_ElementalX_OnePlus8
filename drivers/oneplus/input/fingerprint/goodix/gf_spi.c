@@ -653,8 +653,27 @@ static ssize_t screen_state_get(struct device *device,
 
 static DEVICE_ATTR(screen_state, 0400, screen_state_get, NULL);
 
+/*
+ * touch_state: 1 while the touch controller reports a finger in the
+ * on-screen sensor area (touch_hold mode), 0 otherwise. The value is pushed
+ * to the goodix HAL over netlink already; expose it here too, with
+ * sysfs_notify() so userspace can poll() the file, for compositors that
+ * are not SurfaceFlinger and have no other way to learn about the press.
+ */
+static ssize_t touch_state_get(struct device *device,
+			     struct device_attribute *attribute,
+			     char *buffer)
+{
+	struct gf_dev *gfDev = dev_get_drvdata(device);
+
+	return scnprintf(buffer, PAGE_SIZE, "%i\n", gfDev->touch_state);
+}
+
+static DEVICE_ATTR(touch_state, 0444, touch_state_get, NULL);
+
 static struct attribute *gf_attributes[] = {
 	&dev_attr_screen_state.attr,
+	&dev_attr_touch_state.attr,
 	NULL
 };
 
@@ -700,6 +719,12 @@ int gf_opticalfp_irq_handler(int event)
 	} else if (event == 0) {
 		msg = GF_NET_EVENT_TP_TOUCHUP;
 		sendnlmsg(&msg);
+	}
+
+	if (event == 0 || event == 1) {
+		gf.touch_state = event;
+		sysfs_notify(&gf.spi->dev.kobj, NULL,
+			     dev_attr_touch_state.attr.name);
 	}
 
 	__pm_wakeup_event(&fp_wakelock, 10*HZ);

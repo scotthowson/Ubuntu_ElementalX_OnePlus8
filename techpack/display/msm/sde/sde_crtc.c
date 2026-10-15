@@ -5091,6 +5091,19 @@ static int sde_crtc_onscreenfinger_atomic_check(struct sde_crtc_state *cstate,
 		else {
 			cstate->fingerprint_pressed = false;
 		}
+		/*
+		 * Compositors other than SurfaceFlinger (Mir on Ubuntu Touch)
+		 * submit a single framebuffer plane, so the "fingerprint" (dim)
+		 * and "fppressed" (illumination) planes the OnePlus HWC tags with
+		 * PLANE_PROP_CUSTOM never exist. With force_screenfp set, derive
+		 * both states from the notify_dim / notify_fppress sysfs writes
+		 * instead, so HBM is applied and the UI-ready notification still
+		 * reaches the goodix driver.
+		 */
+		if (oneplus_force_screenfp && fp_index < 0 && fppressed_index < 0) {
+			cstate->fingerprint_mode = (dim_mode != 0);
+			cstate->fingerprint_pressed = (fp_mode != 0);
+		}
 	} else{
 	cstate->fingerprint_pressed = false;
 	cstate->fingerprint_mode = false;

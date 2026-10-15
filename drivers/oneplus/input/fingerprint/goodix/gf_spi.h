@@ -172,6 +172,7 @@ struct gf_dev {
 	struct pinctrl_state   *gpio_state_disable;
 	signed enable_gpio;
 	int screen_state;
+	int touch_state;		/* finger in the sensor area (from touch driver) */
 };
 int gf_pinctrl_init(struct gf_dev* gf_dev);
 int gf_parse_dts(struct gf_dev* gf_dev);
