@@ -90,6 +90,7 @@
 /* Since UDF 2.01 is ISO 13346 based... */
 #define UDF_SUPER_MAGIC		0x15013346
 #define BALLOON_KVM_MAGIC	0x13661366
+#define BINDERFS_SUPER_MAGIC	0x6c6f6f70
 #define ZSMALLOC_MAGIC		0x58295829
 
 #endif /* __LINUX_MAGIC_H__ */
