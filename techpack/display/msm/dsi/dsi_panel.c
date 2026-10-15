@@ -990,7 +990,7 @@ static int dsi_panel_update_backlight(struct dsi_panel *panel,
 		op_dimlayer_bl_enable_real = op_dimlayer_bl_enabled;
 		if (op_dimlayer_bl_enable_real && (bl_lvl != 0) && (bl_lvl < op_dimlayer_bl_alpha))
 			bl_lvl = op_dimlayer_bl_alpha;
-		DSI_ERR("dc light %d %d\n", op_dimlayer_bl_enable_real, bl_lvl);
+		DSI_DEBUG("dc light %d %d\n", op_dimlayer_bl_enable_real, bl_lvl);
 	}
 	if (op_dimlayer_bl_enable_real && (bl_lvl != 0) && (bl_lvl < op_dimlayer_bl_alpha))
 		bl_lvl = op_dimlayer_bl_alpha;
@@ -1027,7 +1027,7 @@ static int dsi_panel_update_backlight(struct dsi_panel *panel,
 #else
 		rc = mipi_dsi_dcs_set_display_brightness_samsung(dsi, bl_lvl);
 #endif
-		DSI_ERR("backlight = %d\n", bl_lvl);
+		DSI_DEBUG("backlight = %d\n", bl_lvl);
 		cur_backlight = bl_lvl;
 		cur_fps = mode_fps;
 		cur_h = panel->cur_mode->timing.h_active;
@@ -5176,7 +5176,7 @@ int dsi_panel_switch(struct dsi_panel *panel)
 		DSI_ERR("[%s] failed to send DSI_CMD_SET_TIMING_SWITCH cmds, rc=%d\n",
 		       panel->name, rc);
 
-	DSI_ERR("panel->cur_mode->timing->h_active = %d\n", panel->cur_mode->timing.h_active);
+	DSI_DEBUG("panel->cur_mode->timing->h_active = %d\n", panel->cur_mode->timing.h_active);
 
 	if((strcmp(panel->name, "samsung dsc cmd mode oneplus dsi panel") == 0) && (gamma_read_flag == GAMMA_READ_SUCCESS)) {
 		if (mode_fps == 90) {
@@ -5428,7 +5428,7 @@ int dsi_panel_disable(struct dsi_panel *panel)
 					panel->name, rc);
 			rc = 0;
 		}
-		DSI_ERR("aod_mode = %d\n", panel->aod_mode);
+		DSI_DEBUG("aod_mode = %d\n", panel->aod_mode);
 		if (panel->aod_mode == 2)
 			panel->aod_status = 1;
 
@@ -5622,7 +5622,7 @@ int dsi_panel_set_hbm_mode(struct dsi_panel *panel, int level)
 				HBM_flag = false;
 				rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_HBM_OFF);
 				DSI_ERR("Send DSI_CMD_SET_HBM_OFF cmds.\n");
-				DSI_ERR("hbm_backight = %d, panel->bl_config.bl_level = %d\n",panel->hbm_backlight, panel->bl_config.bl_level);
+				DSI_DEBUG("hbm_backight = %d, panel->bl_config.bl_level = %d\n",panel->hbm_backlight, panel->bl_config.bl_level);
 				rc= dsi_panel_update_backlight(panel,panel->hbm_backlight);
 			}
 			break;
@@ -5751,7 +5751,7 @@ int dsi_panel_set_hbm_brightness(struct dsi_panel *panel, int level)
 #else
 	rc = mipi_dsi_dcs_set_display_brightness_samsung(dsi, level);
 #endif
-	DSI_ERR("hbm backlight = %d\n", level);
+	DSI_DEBUG("hbm backlight = %d\n", level);
 
 error:
 	mutex_unlock(&panel->panel_lock);
@@ -6038,7 +6038,7 @@ int dsi_panel_set_aod_mode(struct dsi_panel *panel, int level)
 		return 0;
 
 	mode = panel->cur_mode;
-	DSI_ERR("aod_status == %d\n", panel->aod_status);
+	DSI_DEBUG("aod_status == %d\n", panel->aod_status);
 
 	if (level == 1) {
 		if (panel->aod_status == 0) {

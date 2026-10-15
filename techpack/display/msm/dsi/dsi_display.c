@@ -804,7 +804,7 @@ int dsi_display_set_backlight(struct drm_connector *connector,
 			panel->hbm_backlight = bl_lvl;
 			panel->bl_config.bl_level = bl_lvl;
 		}
-		DSI_ERR("hbm_backlight = %d\n", panel->hbm_backlight);
+		DSI_DEBUG("hbm_backlight = %d\n", panel->hbm_backlight);
 		rc = -EINVAL;
 		goto error;
 	}
@@ -2324,7 +2324,7 @@ int dsi_display_check_status(struct drm_connector *connector, void *display,
 
 	if ((dsi_display->panel->panel_switch_status == true)
 		&& (strcmp(dsi_display->panel->name, "samsung ana6706 dsc cmd mode panel") == 0)) {
-		DSI_ERR("panel_switch_status = true, skip ESD reading\n");
+		DSI_DEBUG("panel_switch_status = true, skip ESD reading\n");
 		goto release_panel_lock;
 	}
 
@@ -8232,7 +8232,7 @@ int dsi_display_validate_mode_change(struct dsi_display *display,
 				mode_fps = adj_mode->timing.refresh_rate;
 				dynamic_fps = mode_fps;
 				notifier_data.data = &dynamic_fps;
-				DSI_ERR("set fps: %d\n", dynamic_fps);
+				DSI_DEBUG("set fps: %d\n", dynamic_fps);
 				if (lcd_active_panel)
 					drm_panel_notifier_call_chain(lcd_active_panel, DRM_PANEL_EARLY_EVENT_BLANK, &notifier_data);
 			}
@@ -10268,7 +10268,7 @@ int dsi_display_get_serial_number(struct drm_connector *connector)
 		}
 		panel_msec_int = panel_msec/10;
 		panel_msec_rem = panel_msec%10;
-		DSI_ERR("panel_msec is %d , panel_msec_int is %d , panel_msec_rem is %d.\n", panel_msec, panel_msec_int, panel_msec_rem);
+		DSI_DEBUG("panel_msec is %d , panel_msec_int is %d , panel_msec_rem is %d.\n", panel_msec, panel_msec_int, panel_msec_rem);
 
 		panel->panel_year = panel_year;
 		panel->panel_mon = panel_mon;
