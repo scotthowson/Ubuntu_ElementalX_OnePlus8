@@ -1555,6 +1555,57 @@ int mhi_device_get_sync(struct mhi_device *mhi_dev, int vote)
 }
 EXPORT_SYMBOL(mhi_device_get_sync);
 
+int mhi_device_get_sync_atomic(struct mhi_device *mhi_dev, int timeout_us)
+{
+	struct mhi_controller *mhi_cntrl = mhi_dev->mhi_cntrl;
+
+	read_lock_bh(&mhi_cntrl->pm_lock);
+	if (MHI_PM_IN_ERROR_STATE(mhi_cntrl->pm_state)) {
+		read_unlock_bh(&mhi_cntrl->pm_lock);
+		return -EIO;
+	}
+
+	mhi_cntrl->wake_get(mhi_cntrl, true);
+	read_unlock_bh(&mhi_cntrl->pm_lock);
+
+	atomic_inc(&mhi_dev->dev_vote);
+	pm_wakeup_hard_event(&mhi_cntrl->mhi_dev->dev);
+	mhi_cntrl->runtime_get(mhi_cntrl, mhi_cntrl->priv_data);
+
+	/* Return if client doesn't want us to wait */
+	if (!timeout_us) {
+		if (mhi_cntrl->pm_state != MHI_PM_M0)
+			MHI_ERR("Return without waiting for M0\n");
+
+		mhi_cntrl->runtime_put(mhi_cntrl, mhi_cntrl->priv_data);
+		return 0;
+	}
+
+	while (mhi_cntrl->pm_state != MHI_PM_M0 &&
+			!MHI_PM_IN_ERROR_STATE(mhi_cntrl->pm_state) &&
+			timeout_us > 0) {
+		udelay(MHI_FORCE_WAKE_DELAY_US);
+		timeout_us -= MHI_FORCE_WAKE_DELAY_US;
+	}
+
+	if (MHI_PM_IN_ERROR_STATE(mhi_cntrl->pm_state) || timeout_us <= 0) {
+		MHI_ERR("Did not enter M0 state, cur_state:%s pm_state:%s\n",
+			TO_MHI_STATE_STR(mhi_cntrl->dev_state),
+			to_mhi_pm_state_str(mhi_cntrl->pm_state));
+		read_lock_bh(&mhi_cntrl->pm_lock);
+		mhi_cntrl->wake_put(mhi_cntrl, false);
+		read_unlock_bh(&mhi_cntrl->pm_lock);
+		atomic_dec(&mhi_dev->dev_vote);
+		mhi_cntrl->runtime_put(mhi_cntrl, mhi_cntrl->priv_data);
+		return -ETIMEDOUT;
+	}
+
+	mhi_cntrl->runtime_put(mhi_cntrl, mhi_cntrl->priv_data);
+
+	return 0;
+}
+EXPORT_SYMBOL(mhi_device_get_sync_atomic);
+
 void mhi_device_put(struct mhi_device *mhi_dev, int vote)
 {
 	struct mhi_controller *mhi_cntrl = mhi_dev->mhi_cntrl;

@@ -514,6 +514,8 @@ enum MHI_PM_STATE {
 #define MHI_WAKE_DB_FORCE_SET_VALID(pm_state) MHI_WAKE_DB_CLEAR_VALID(pm_state)
 #define MHI_EVENT_ACCESS_INVALID(pm_state) (pm_state == MHI_PM_DISABLE || \
 					    MHI_PM_IN_ERROR_STATE(pm_state))
+#define MHI_FORCE_WAKE_DELAY_US (100)
+
 #define MHI_PM_IN_SUSPEND_STATE(pm_state) (pm_state & \
 					   (MHI_PM_M3_ENTER | MHI_PM_M3))
 

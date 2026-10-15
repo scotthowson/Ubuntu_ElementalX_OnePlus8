@@ -84,6 +84,7 @@ struct cnss_pci_data {
 	size_t smmu_iova_len;
 	dma_addr_t smmu_iova_ipa_start;
 	size_t smmu_iova_ipa_len;
+	dma_addr_t smmu_iova_ipa_current;
 	void __iomem *bar;
 	struct cnss_msi_config *msi_config;
 	u32 msi_ep_base_data;
