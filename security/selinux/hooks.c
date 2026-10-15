@@ -3171,8 +3171,7 @@ static int selinux_inode_follow_link(struct dentry *dentry, struct inode *inode,
 
 static noinline int audit_inode_permission(struct inode *inode,
 					   u32 perms, u32 audited, u32 denied,
-					   int result,
-					   unsigned flags)
+					   int result)
 {
 	struct common_audit_data ad;
 	struct inode_security_struct *isec = inode->i_security;
@@ -3183,7 +3182,7 @@ static noinline int audit_inode_permission(struct inode *inode,
 
 	rc = slow_avc_audit(&selinux_state,
 			    current_sid(), isec->sid, isec->sclass, perms,
-			    audited, denied, result, &ad, flags);
+			    audited, denied, result, &ad);
 	if (rc)
 		return rc;
 	return 0;
@@ -3230,7 +3229,11 @@ static int selinux_inode_permission(struct inode *inode, int mask)
 	if (likely(!audited))
 		return rc;
 
-	rc2 = audit_inode_permission(inode, perms, audited, denied, rc, flags);
+	/* fall back to ref-walk if we have to generate audit */
+	if (flags & MAY_NOT_BLOCK)
+		return -ECHILD;
+
+	rc2 = audit_inode_permission(inode, perms, audited, denied, rc);
 	if (rc2)
 		return rc2;
 	return rc;
@@ -3300,6 +3303,9 @@ static int selinux_inode_setxattr(struct dentry *dentry, const char *name,
 		   ordinary setattr permission. */
 		return dentry_has_perm(current_cred(), dentry, FILE__SETATTR);
 	}
+
+	if (!selinux_state.initialized)
+		return (inode_owner_or_capable(inode) ? 0 : -EPERM);
 
 	sbsec = inode->i_sb->s_security;
 	if (!(sbsec->flags & SBLABEL_MNT))
@@ -3381,6 +3387,15 @@ static void selinux_inode_post_setxattr(struct dentry *dentry, const char *name,
 
 	if (strcmp(name, XATTR_NAME_SELINUX)) {
 		/* Not an attribute we recognize, so nothing to do. */
+		return;
+	}
+
+	if (!selinux_state.initialized) {
+		/* If we haven't even been initialized, then we can't validate
+		 * against a policy, so leave the label as invalid. It may
+		 * resolve to a valid label on the next revalidation try if
+		 * we've since initialized.
+		 */
 		return;
 	}
 
@@ -5603,6 +5618,7 @@ static int selinux_nlmsg_perm(struct sock *sk, struct sk_buff *skb)
 
 	while (data_len >= nlmsg_total_size(0)) {
 		nlh = (struct nlmsghdr *)data;
+
 		/* NOTE: the nlmsg_len field isn't reliably set by some netlink
 		 *       users which means we can't reject skb's with bogus
 		 *       length fields; our solution is to follow what
@@ -5612,7 +5628,6 @@ static int selinux_nlmsg_perm(struct sock *sk, struct sk_buff *skb)
 		if (nlh->nlmsg_len < NLMSG_HDRLEN || nlh->nlmsg_len > data_len)
 			return 0;
 
-
 		rc = selinux_nlmsg_lookup(sclass, nlh->nlmsg_type, &perm);
 		if (rc == 0) {
 			rc = sock_has_perm(sk, perm);
@@ -5620,10 +5635,12 @@ static int selinux_nlmsg_perm(struct sock *sk, struct sk_buff *skb)
 				return rc;
 		} else if (rc == -EINVAL) {
 			/* -EINVAL is a missing msg/perm mapping */
-			pr_warn_ratelimited("SELinux: unrecognized netlink message: protocol=%hu nlmsg_type=%hu sclass=%s pid=%d comm=%s\n",
-			       sk->sk_protocol, nlh->nlmsg_type,
-				   secclass_map[sclass - 1].name,
-			       task_pid_nr(current), current->comm);
+			pr_warn_ratelimited("SELinux: unrecognized netlink"
+				" message: protocol=%hu nlmsg_type=%hu sclass=%s"
+				" pid=%d comm=%s\n",
+				sk->sk_protocol, nlh->nlmsg_type,
+				secclass_map[sclass - 1].name,
+				task_pid_nr(current), current->comm);
 			if (enforcing_enabled(&selinux_state) &&
 			    !security_get_allow_unknown(&selinux_state))
 				return rc;
@@ -5633,7 +5650,6 @@ static int selinux_nlmsg_perm(struct sock *sk, struct sk_buff *skb)
 			rc = 0;
 		} else {
 			return rc;
-
 		}
 
 		/* move to the next message after applying netlink padding */
@@ -5643,6 +5659,7 @@ static int selinux_nlmsg_perm(struct sock *sk, struct sk_buff *skb)
 		data_len -= msg_len;
 		data += msg_len;
 	}
+
 	return rc;
 }
 
