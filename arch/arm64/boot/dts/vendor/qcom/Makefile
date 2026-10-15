@@ -1,3 +1,10 @@
+# Overlay fragments are compiled without their base tree, so dtc cannot know the
+# target node's #address-cells/#size-cells and falls back to the defaults. The
+# reg_format and avoid_default_addr_size checks then fire for every I2C/SPMI
+# child in the OnePlus overlays. They are false positives: the overlays apply
+# correctly once merged with kona.dtb. Silence them.
+DTC_FLAGS += -Wno-reg_format -Wno-avoid_default_addr_size
+
 ifeq ($(CONFIG_BUILD_ARM64_DT_OVERLAY_NOT_OEM),y)
         dtbo-$(CONFIG_ARCH_KONA) += \
                 kona-cdp-overlay.dtbo \
