@@ -620,7 +620,7 @@ struct l2cap_ops {
 					       unsigned long hdr_len,
 					       unsigned long len, int nb);
 	int			(*filter) (struct l2cap_chan * chan,
-					 struct sk_buff *skb);
+					   struct sk_buff *skb);
 };
 
 struct l2cap_conn {
