@@ -24,30 +24,30 @@ kona-qrd-overlay.dtbo-base := kona.dtb kona-v2.dtb kona-v2.1.dtb
 kona-hdk-overlay.dtbo-base := kona.dtb kona-v2.dtb kona-v2.1.dtb
 else
 ifeq ($(CONFIG_BUILD_ARM64_DT_OVERLAY),y)
+# OnePlus 8 family. The bootloader picks the overlay whose oem,hw-id matches
+# the board, so every hardware revision of the chosen device is included;
+# other devices of the family are not (see CONFIG_ARCH_ONEPLUS8PRO).
+ifeq ($(CONFIG_ARCH_ONEPLUS8PRO),y)
         dtbo-$(CONFIG_ARCH_KONA) += \
                 instantnoodlep-overlay-evb.dtbo \
                 instantnoodlep-overlay-t0.dtbo \
                 instantnoodlep-overlay-evt1.dtbo \
-                instantnoodlep-overlay-dvt.dtbo \
-                instantnoodle-overlay-t0.dtbo \
-                instantnoodle-overlay-evt1.dtbo \
-                instantnoodle-overlay-dvt.dtbo \
-                instantnoodlev-overlay-t0.dtbo \
-                instantnoodlev-overlay-evt1.dtbo \
-                instantnoodlev-overlay-dvt.dtbo
+                instantnoodlep-overlay-dvt.dtbo
 
 instantnoodlep-overlay-evb.dtbo-base := kona.dtb kona-v2.dtb kona-v2.1.dtb
 instantnoodlep-overlay-t0.dtbo-base := kona.dtb kona-v2.dtb kona-v2.1.dtb
 instantnoodlep-overlay-evt1.dtbo-base := kona.dtb kona-v2.dtb kona-v2.1.dtb
 instantnoodlep-overlay-dvt.dtbo-base := kona.dtb kona-v2.dtb kona-v2.1.dtb
+else
+        dtbo-$(CONFIG_ARCH_KONA) += \
+                instantnoodle-overlay-t0.dtbo \
+                instantnoodle-overlay-evt1.dtbo \
+                instantnoodle-overlay-dvt.dtbo
 
 instantnoodle-overlay-t0.dtbo-base := kona.dtb kona-v2.dtb kona-v2.1.dtb
 instantnoodle-overlay-evt1.dtbo-base := kona.dtb kona-v2.dtb kona-v2.1.dtb
 instantnoodle-overlay-dvt.dtbo-base := kona.dtb kona-v2.dtb kona-v2.1.dtb
-
-instantnoodlev-overlay-t0.dtbo-base := kona.dtb kona-v2.dtb kona-v2.1.dtb
-instantnoodlev-overlay-evt1.dtbo-base := kona.dtb kona-v2.dtb kona-v2.1.dtb
-instantnoodlev-overlay-dvt.dtbo-base := kona.dtb kona-v2.dtb kona-v2.1.dtb
+endif
 
 else
 dtb-$(CONFIG_ARCH_KONA) += kona-rumi.dtb \
@@ -68,33 +68,6 @@ dtb-$(CONFIG_ARCH_KONA) += kona-rumi.dtb \
         kona-v2.1-qrd.dtb \
         kona-v2.1-hdk.dtb
 endif
-endif
-
-ifeq ($(CONFIG_ARCH_HOWSON),y)
-        dtbo-$(CONFIG_ARCH_KONA) += \
-                instantnoodlep-howson-overlay-evb.dtbo \
-                instantnoodlep-howson-overlay-t0.dtbo \
-                instantnoodlep-howson-overlay-evt1.dtbo \
-                instantnoodlep-howson-overlay-dvt.dtbo \
-                instantnoodle-howson-overlay-t0.dtbo \
-                instantnoodle-howson-overlay-evt1.dtbo \
-                instantnoodle-howson-overlay-dvt.dtbo \
-                instantnoodlev-howson-overlay-t0.dtbo \
-                instantnoodlev-howson-overlay-evt1.dtbo \
-                instantnoodlev-howson-overlay-dvt.dtbo
-
-instantnoodlep-howson-overlay-evb.dtbo-base := kona.dtb kona-v2.dtb kona-v2.1.dtb
-instantnoodlep-howson-overlay-t0.dtbo-base := kona.dtb kona-v2.dtb kona-v2.1.dtb
-instantnoodlep-howson-overlay-evt1.dtbo-base := kona.dtb kona-v2.dtb kona-v2.1.dtb
-instantnoodlep-howson-overlay-dvt.dtbo-base := kona.dtb kona-v2.dtb kona-v2.1.dtb
-
-instantnoodle-howson-overlay-t0.dtbo-base := kona.dtb kona-v2.dtb kona-v2.1.dtb
-instantnoodle-howson-overlay-evt1.dtbo-base := kona.dtb kona-v2.dtb kona-v2.1.dtb
-instantnoodle-howson-overlay-dvt.dtbo-base := kona.dtb kona-v2.dtb kona-v2.1.dtb
-
-instantnoodlev-howson-overlay-t0.dtbo-base := kona.dtb kona-v2.dtb kona-v2.1.dtb
-instantnoodlev-howson-overlay-evt1.dtbo-base := kona.dtb kona-v2.dtb kona-v2.1.dtb
-instantnoodlev-howson-overlay-dvt.dtbo-base := kona.dtb kona-v2.dtb kona-v2.1.dtb
 endif
 
 ifeq ($(CONFIG_BUILD_ARM64_DT_OVERLAY),y)
