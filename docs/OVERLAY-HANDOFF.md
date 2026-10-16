@@ -1,5 +1,51 @@
 # Rundown for the overlay / build-repo agent
 
+## Status 2026-10-16: the 4.19.325 kernel does not boot, bisect needed
+
+The first device test of `Halium-10-stable` (Linux 4.19.325) fails: the phone resets
+before the USB gadget comes up (no RNDIS, no adb, no Halium initrd telnet), and the
+recovery image from the same build fails identically.  The old `Halium-10` kernel boots
+the same rootfs, overlay and dtbo, and the new kernel fails with the old dtbo too, so the
+regression is in the kernel itself.  No ramoops/pstore log survives a reset on this
+device, and nothing is visible by inspection, so we bisect by chunk.
+
+Bisect branches on the kernel repo (`scotthowson/Ubuntu_ElementalX_OnePlus8`), one per
+squashed stable chunk, all compile-tested with clang 18:
+
+| `deviceinfo_kernel_source_branch` | Kernel |
+|---|---|
+| `bisect/stable-4.19.100` | v4.19.82..100 |
+| `bisect/stable-4.19.150` | ..150 |
+| `bisect/stable-4.19.200` | ..200 (build this one first) |
+| `bisect/stable-4.19.250` | ..250 |
+| `bisect/stable-4.19.300` | ..300 |
+| `bisect/stable-4.19.325` | ..325, includes the clang 9 Makefile fix |
+
+Procedure:
+
+1. Build with `deviceinfo_kernel_source_branch="bisect/stable-4.19.200"`.  Nothing else in
+   `deviceinfo` or the overlay changes.  Publish `boot.img` (the dtbo from any build is
+   fine; the old one is known good).
+2. The user tests from the bootloader with `fastboot boot boot.img` (the flashed
+   `Halium-10` kernel stays as fallback) and reports boots / loops plus the seconds from
+   the OnePlus logo to the reset.
+3. Boots: next `bisect/stable-4.19.300`, then `.250` or `.325`.  Loops: next `.100`,
+   then `.150`.  Three builds pin the chunk; the kernel side then diffs that chunk
+   against LineageOS 22.2 (4.19.325 on the same SoC) and fixes it.
+4. When a bisect kernel boots to the UI, also collect over ssh:
+   `uname -r; dmesg | grep -i -E 'warn|bug|error' | head -40`.
+
+CI toolchain note: the runner builds with the AOSP android10-gsi clang (r353983c,
+clang 9).  `Halium-10-stable` carries a `scripts/Makefile.extrawarn` fix so that
+upstream's new clang warning flags are probed instead of forced; the five older bisect
+branches predate those flags and need nothing.  Please attach the CI build log of each
+bisect build to the result: clang 9 is older than anything the merged upstream code has
+been compiled with, and a warning there may be the clue.
+
+Nothing in the overlay is implicated and no overlay change is needed for the bisect.
+
+## Earlier items (still valid)
+
 Kernel side status as of the linux-stable 4.19.200 merge.  For the full kernel change
 list see `docs/CHANGELOG.md` in this repo.  Items are grouped by whether the overlay agent
 needs to act now, later, or just know.
