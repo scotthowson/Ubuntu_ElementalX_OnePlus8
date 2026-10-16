@@ -945,6 +945,8 @@ config PANIC_ON_REFCOUNT_ERROR
 	  has detected any type of error (e.g. potential use-after-free
 	  or potential memory-leaks) with an object associated with that
 	  reference counter.
+config ARCH_USE_MEMREMAP_PROT
+	bool
 
 source "kernel/gcov/Kconfig"
 

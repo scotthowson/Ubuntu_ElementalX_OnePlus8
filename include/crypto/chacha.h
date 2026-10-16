@@ -33,6 +33,20 @@ struct chacha_ctx {
 	int nrounds;
 };
 
+/* The "expand 32-byte k" constants, as used by drivers/char/random.c */
+#define CHACHA_CONSTANT_EXPA	0x61707865U
+#define CHACHA_CONSTANT_ND_3	0x3320646eU
+#define CHACHA_CONSTANT_2_BY	0x79622d32U
+#define CHACHA_CONSTANT_TE_K	0x6b206574U
+
+static inline void chacha_init_consts(u32 *state)
+{
+	state[0]  = CHACHA_CONSTANT_EXPA;
+	state[1]  = CHACHA_CONSTANT_ND_3;
+	state[2]  = CHACHA_CONSTANT_2_BY;
+	state[3]  = CHACHA_CONSTANT_TE_K;
+}
+
 void chacha_block(u32 *state, u8 *stream, int nrounds);
 static inline void chacha20_block(u32 *state, u8 *stream)
 {
