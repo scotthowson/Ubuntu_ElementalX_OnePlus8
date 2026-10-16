@@ -52,8 +52,8 @@ upstream with adaptation to the CAF/WALT code.
 |---|---|---|
 | v4.19.82..100 | `fbd63de70`, fixes `a5e03602d`, `600a2863b` | builds |
 | v4.19.101..150 | `5092898b9` | builds |
-| v4.19.151..200 | (this commit) | builds |
-| v4.19.201..250 | pending | |
+| v4.19.151..200 | `11a46463b` | builds |
+| v4.19.201..250 | `42165ffba` | builds |
 | v4.19.251..300 | pending | |
 | v4.19.301..325 | pending | |
 
@@ -70,6 +70,12 @@ Things that change for userspace with the stable series:
   `fscrypt.h`); `fscrypt_is_nokey_name()` lives there and ext4/f2fs/ubifs use it.
 - dm-table: upstream dropped `dm_table_all_devices_attribute()`; the inline-crypt queue
   flag is now derived through `dm_table_any_dev_attr()` like the other attributes.
+- From 4.19.235 the kernel carries upstream's rewritten `drivers/char/random.c` (the 5.18
+  RNG backport), built on our `<crypto/chacha.h>`; `CONFIG_RANDOM_TRUST_BOOTLOADER` is new
+  and `/dev/random` no longer blocks after the CRNG is seeded.
+- Spectre-BHB mitigation (`CONFIG_MITIGATE_SPECTRE_BRANCH_HISTORY`) is in from 4.19.234.
+- The MMC core stays at the CAF version (the device has no SD/eMMC); upstream's BKOPS
+  cleanup is not taken.
 
 Not booted yet: the stable branch is build-tested only.  First device test happens after
 the last chunk, by pointing `deviceinfo_kernel_source_branch` at `Halium-10-stable` in a
