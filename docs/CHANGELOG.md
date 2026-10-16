@@ -54,13 +54,13 @@ upstream with adaptation to the CAF/WALT code.
 | v4.19.101..150 | `5092898b9` | builds |
 | v4.19.151..200 | `11a46463b` | builds |
 | v4.19.201..250 | `42165ffba` | builds |
-| v4.19.251..300 | pending | |
-| v4.19.301..325 | pending | |
+| v4.19.251..300 | `5a9843ba6` | builds |
+| v4.19.301..325 | `bcc284993681` | builds |
 
 Things that change for userspace with the stable series:
 
-- `uname -r` moves from `4.19.81-perf` to the merged version (`4.19.200-perf` and so on).
-  Vendor blobs do not key on it; nothing in the overlay does either.
+- `uname -r` moves from `4.19.81-perf` to `4.19.325-perf`.  Vendor blobs do not key on
+  it; nothing in the overlay does either.
 - `stpcpy()` is in `lib/string.c` from 4.19.150, so clang builds no longer need
   `-fno-builtin-stpcpy`.
 - The qcacld WLAN driver's `>= 4.19.110` check selected the Android-common-kernel
@@ -77,9 +77,15 @@ Things that change for userspace with the stable series:
 - The MMC core stays at the CAF version (the device has no SD/eMMC); upstream's BKOPS
   cleanup is not taken.
 
-Not booted yet: the stable branch is build-tested only.  First device test happens after
-the last chunk, by pointing `deviceinfo_kernel_source_branch` at `Halium-10-stable` in a
-test build.
+The series is complete: the branch is at Linux 4.19.325, the final 4.19 release.  It is
+build-tested only.  The first device test is a build with `deviceinfo_kernel_source_branch`
+pointed at `Halium-10-stable`; once that boots with WiFi, Bluetooth, charging and display
+working, the branch is fast-forwarded into `Halium-10`.
+
+Also kept at the CAF version because upstream's changes do not fit the Qualcomm driver:
+the whole UFS host driver (`drivers/scsi/ufs/`), the dwc3 USB controller, the MMC core,
+the rmnet data path, and `drivers/iommu/io-pgtable-arm.c`.  The CAF hrtimer CPU-isolation
+path (`hrtimer_quiesce_cpu()`) coexists with upstream's `hrtimers_cpu_dying()`.
 
 ## Under-display fingerprint (UDFPS), state of play
 
@@ -111,8 +117,7 @@ exhausted for now; the next suspects are the Mir/Qt render path in the rootfs.
 
 ## Still planned
 
-1. Remaining stable chunks (4.19.250, 300, 325), then a boot test and fold into
-   `Halium-10`.
+1. Boot test of `Halium-10-stable` (4.19.325) on the device, then fold into `Halium-10`.
 2. Newer toolchain in CI (clang 18 already builds it locally with the warning set in the
    build repo's `build.conf`).
 3. LTO/CFI as an optional, last step.
